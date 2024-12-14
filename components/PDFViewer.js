@@ -71,6 +71,11 @@ export default function PDFViewer({ file }) {
   const readerRef = useRef(null);
   const mediaSourceRef = useRef(null);
   const [selectedVoice, setSelectedVoice] = useState(voices[0].value);
+  const [isCallActive, setIsCallActive] = useState(false);
+  const [isConnecting, setIsConnecting] = useState(false);
+  const streamRef = useRef(null);
+  const wsRef = useRef(null);
+  const mediaRecorder = useRef(null);
 
   const handlePauseResume = useCallback(() => {
     if (!audioRef.current) return;
@@ -344,6 +349,165 @@ export default function PDFViewer({ file }) {
     };
   }, [stopReading, pageNumber, file]);
 
+  // Remove the duplicate cleanupCall declaration and keep only one:
+  const cleanupCall = useCallback(() => {
+    if (wsRef.current) {
+      wsRef.current.close();
+      wsRef.current = null;
+    }
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => track.stop());
+      streamRef.current = null;
+    }
+    if (mediaRecorder.current) {
+      mediaRecorder.current.stop();
+      mediaRecorder.current = null;
+    }
+    setIsCallActive(false);
+    setIsConnecting(false);
+  }, []);
+
+  // Then define handleCall
+  const handleCall = useCallback(async () => {
+    if (isCallActive) {
+      cleanupCall();
+      return;
+    }
+
+    // If audio is playing, pause it
+    if (isReading && !isPaused) {
+      handlePauseResume();
+    }
+
+    try {
+      setIsConnecting(true);
+
+      // Get current voice name and create agent
+      const currentVoice = voices.find(v => v.value === selectedVoice);
+      const voiceName = currentVoice?.name || 'Assistant';
+
+      // Get current page text
+      const pdf = await pdfjs.getDocument(file).promise;
+      const page = await pdf.getPage(pageNumber);
+      const textContent = await page.getTextContent();
+      const pageText = textContent.items.map(item => item.str).join(' ');
+
+      // Create agent through our API route
+      const response = await fetch('/api/agent', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          voice: selectedVoice,
+          voiceName: voiceName,
+          pageText: pageText
+        })
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Failed to create agent');
+      }
+
+      const agent = await response.json();
+      console.log('Agent created:', agent);
+
+      // Get microphone permission
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          channelCount: 1,
+          echoCancellation: true,
+          autoGainControl: true,
+          noiseSuppression: true,
+        }
+      });
+      streamRef.current = stream;
+
+      // Setup WebSocket
+      const ws = new WebSocket(`wss://api.play.ai/v1/talk/${agent.id}`);
+      wsRef.current = ws;
+
+      let isInitialized = false;
+
+      ws.onopen = () => {
+        console.log('WebSocket connected');
+        ws.send(JSON.stringify({
+          type: 'setup',
+          apiKey: process.env.NEXT_PUBLIC_APIKey  // Just use the API key without Bearer
+        }));
+      };
+
+      ws.onmessage = async (event) => {
+        const message = JSON.parse(event.data);
+        console.log('Received message:', message);
+        
+        switch (message.type) {
+          case 'init':
+            console.log('Conversation initialized');
+            isInitialized = true;
+            mediaRecorder.current = new MediaRecorder(streamRef.current, {
+              mimeType: 'audio/webm;codecs=opus',
+              bitsPerSecond: 16000
+            });
+
+            mediaRecorder.current.ondataavailable = async (event) => {
+              if (event.data.size > 0 && wsRef.current?.readyState === WebSocket.OPEN && isInitialized) {
+                const reader = new FileReader();
+                reader.onloadend = () => {
+                  const base64data = reader.result.split(',')[1];
+                  wsRef.current.send(JSON.stringify({
+                    type: 'audioIn',
+                    data: base64data
+                  }));
+                };
+                reader.readAsDataURL(event.data);
+              }
+            };
+
+            mediaRecorder.current.start(250);
+            break;
+
+          case 'audioStream':
+            try {
+              // Create audio element for this chunk
+              const audio = new Audio(`data:audio/mp3;base64,${message.data}`);
+              
+              audio.onended = () => {
+                audio.remove(); // Cleanup
+              };
+
+              await audio.play();
+            } catch (error) {
+              console.error('Error playing audio:', error);
+            }
+            break;
+
+          case 'error':
+            console.error('WebSocket error message:', message);
+            cleanupCall();
+            break;
+
+          // ... rest of the cases ...
+        }
+      };
+
+      ws.onerror = (error) => {
+        console.error('WebSocket connection error:', error);
+        cleanupCall();
+      };
+
+      ws.onclose = () => {
+        console.log('WebSocket closed');
+        cleanupCall();
+      };
+
+    } catch (error) {
+      console.error('Error setting up call:', error);
+      cleanupCall();
+    }
+  }, [file, pageNumber, isReading, isPaused, handlePauseResume, selectedVoice, isCallActive, cleanupCall]);
+
   if (error) {
     return <div>Error loading PDF: {error.message}</div>;
   }
@@ -413,6 +577,14 @@ export default function PDFViewer({ file }) {
             {isPaused ? 'Resume' : 'Pause'}
           </button>
         )}
+        <button 
+          className={styles.button}
+          onClick={handleCall}
+          type="button"
+          aria-label="Start call"
+        >
+          Call
+        </button>
       </div>
     </div>
   );
