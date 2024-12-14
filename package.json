@@ -9,8 +9,11 @@
     "lint": "next lint"
   },
   "dependencies": {
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0",
-    "next": "15.1.0"
+    "@react-pdf/renderer": "^4.1.5",
+    "next": "15.1.0",
+    "pdfjs-dist": "^3.6.172",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-pdf": "^7.1.2"
   }
 }

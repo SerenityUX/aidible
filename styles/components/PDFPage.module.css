@@ -1,0 +1,12 @@
+.container {
+  position: relative;
+}
+
+.textLayer {
+  user-select: text !important;
+  cursor: text !important;
+}
+
+.textLayer > span {
+  cursor: text !important;
+}
