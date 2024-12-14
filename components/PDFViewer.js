@@ -66,14 +66,14 @@ export default function PDFViewer({ file }) {
   const [pageNumber, setPageNumber] = useState(1);
   const [error, setError] = useState(null);
   const [isReading, setIsReading] = useState(false);
-  const audioRef = useRef(new Audio());
+  const audioRef = useRef(null);
   const readerRef = useRef(null);
   const mediaSourceRef = useRef(null);
 
   const stopReading = useCallback(() => {
     try {
       if (readerRef.current) {
-        readerRef.current.cancel();
+        readerRef.current.cancel('User stopped playback');
         readerRef.current = null;
       }
 
@@ -89,8 +89,8 @@ export default function PDFViewer({ file }) {
       }
 
       if (audioRef.current) {
-        const currentSrc = audioRef.current.src;
         audioRef.current.pause();
+        const currentSrc = audioRef.current.src;
         audioRef.current.src = '';
         audioRef.current.load();
         if (currentSrc) {
@@ -100,6 +100,7 @@ export default function PDFViewer({ file }) {
             console.warn('URL cleanup error:', e);
           }
         }
+        audioRef.current = null;
       }
 
       setIsReading(false);
@@ -145,6 +146,7 @@ export default function PDFViewer({ file }) {
 
       stopReading();
 
+      audioRef.current = new Audio();
       const mediaSource = new MediaSource();
       mediaSourceRef.current = mediaSource;
       const sourceUrl = URL.createObjectURL(mediaSource);
@@ -159,6 +161,14 @@ export default function PDFViewer({ file }) {
           let isFirstChunk = true;
           let isStopped = false;
 
+          const cleanup = () => {
+            isStopped = true;
+            if (readerRef.current) {
+              readerRef.current.cancel('Stream ended');
+              readerRef.current = null;
+            }
+          };
+
           const appendNextChunk = async () => {
             if (chunks.length === 0 || sourceBuffer.updating || isStopped) return;
 
@@ -168,11 +178,17 @@ export default function PDFViewer({ file }) {
 
               if (isFirstChunk) {
                 isFirstChunk = false;
-                audioRef.current?.play().catch(console.error);
+                audioRef.current?.play().catch(error => {
+                  console.error('Error starting playback:', error);
+                  cleanup();
+                  stopReading();
+                });
               }
             } catch (error) {
               if (error.name !== 'InvalidStateError') {
                 console.error('Error appending chunk:', error);
+                cleanup();
+                stopReading();
               }
             }
           };
@@ -181,6 +197,12 @@ export default function PDFViewer({ file }) {
             if (!isStopped) {
               appendNextChunk();
             }
+          });
+
+          sourceBuffer.addEventListener('error', (error) => {
+            console.error('SourceBuffer error:', error);
+            cleanup();
+            stopReading();
           });
 
           const readChunks = async () => {
@@ -192,10 +214,12 @@ export default function PDFViewer({ file }) {
                   if (chunks.length === 0 && !sourceBuffer.updating && mediaSource.readyState === 'open') {
                     mediaSource.endOfStream();
                   }
+                  cleanup();
                   break;
                 }
 
                 if (!readerRef.current || isStopped) {
+                  cleanup();
                   break;
                 }
 
@@ -211,16 +235,13 @@ export default function PDFViewer({ file }) {
                   mediaSource.endOfStream('error');
                 }
               }
+              cleanup();
+              stopReading();
             }
           };
 
-          mediaSource.addEventListener('sourceended', () => {
-            isStopped = true;
-          });
-
-          mediaSource.addEventListener('sourceclose', () => {
-            isStopped = true;
-          });
+          mediaSource.addEventListener('sourceended', cleanup);
+          mediaSource.addEventListener('sourceclose', cleanup);
 
           readChunks();
         } catch (error) {
@@ -229,24 +250,23 @@ export default function PDFViewer({ file }) {
         }
       });
 
-      audioRef.current.onplay = () => {
-        console.log('Audio playback started');
-        setIsReading(true);
-      };
+      // Set up event listeners only if audioRef.current exists
+      if (audioRef.current) {
+        audioRef.current.onplay = () => {
+          console.log('Audio playback started');
+          setIsReading(true);
+        };
 
-      audioRef.current.onended = () => {
-        console.log('Audio playback ended');
-        stopReading();
-      };
+        audioRef.current.onended = () => {
+          console.log('Audio playback ended');
+          stopReading();
+        };
 
-      audioRef.current.onerror = (e) => {
-        console.error('Audio playback error:', {
-          error: e,
-          errorCode: audioRef.current.error?.code,
-          errorMessage: audioRef.current.error?.message
-        });
-        stopReading();
-      };
+        audioRef.current.onerror = () => {
+          // Just call stopReading to clean up
+          stopReading();
+        };
+      }
 
     } catch (error) {
       console.error('Error reading PDF text:', error);
