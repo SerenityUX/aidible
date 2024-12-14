@@ -138,23 +138,13 @@ export default function PDFViewer({ file }) {
     }
   }, []);
 
-  const handleReadPage = useCallback(async (e) => {
-    e.preventDefault();
-    
-    if (isReading) {
-      console.log('Stopping current playback');
-      stopReading();
-      return;
-    }
-
+  const setupAudioForPage = useCallback(async (pageNum) => {
     try {
-      console.log('Starting text extraction from PDF');
       const pdf = await pdfjs.getDocument(file).promise;
-      const page = await pdf.getPage(pageNumber);
+      const page = await pdf.getPage(pageNum);
       const textContent = await page.getTextContent();
       const text = textContent.items.map(item => item.str).join(' ');
 
-      console.log('Making request to TTS API');
       const response = await fetch('/api/tts', {
         method: 'POST',
         headers: {
@@ -168,8 +158,7 @@ export default function PDFViewer({ file }) {
       });
 
       if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Failed to get audio stream');
+        throw new Error('Failed to get audio stream');
       }
 
       stopReading();
@@ -280,9 +269,17 @@ export default function PDFViewer({ file }) {
           setIsReading(true);
         };
 
-        audioRef.current.onended = () => {
+        audioRef.current.onended = async () => {
           console.log('Audio playback ended');
-          stopReading();
+          
+          // If there's a next page, move to it and start reading
+          if (pageNum < numPages) {
+            const nextPageNumber = pageNum + 1;
+            setPageNumber(nextPageNumber);
+            setupAudioForPage(nextPageNumber);
+          } else {
+            stopReading();
+          }
         };
 
         audioRef.current.onerror = () => {
@@ -291,10 +288,22 @@ export default function PDFViewer({ file }) {
       }
 
     } catch (error) {
-      console.error('Error reading PDF text:', error);
+      console.error('Error setting up audio for page:', error);
       stopReading();
     }
-  }, [file, pageNumber, isReading, stopReading, selectedVoice, volumeLevel]);
+  }, [file, numPages, selectedVoice, stopReading, volumeLevel]);
+
+  const handleReadPage = useCallback(async (e) => {
+    e?.preventDefault();
+    
+    if (isReading) {
+      console.log('Stopping current playback');
+      stopReading();
+      return;
+    }
+
+    setupAudioForPage(pageNumber);
+  }, [isReading, stopReading, pageNumber, setupAudioForPage]);
 
   const handleDocumentLoadSuccess = useCallback(({ numPages }) => {
     stopReading();
