@@ -381,18 +381,20 @@ export default function PDFViewer({ file }) {
         >
           Next
         </button>
-        <select 
-          className={styles.voiceSelect}
-          value={selectedVoice}
-          onChange={handleVoiceChange}
-          aria-label="Select voice"
-        >
-          {voices.map(voice => (
-            <option key={voice.value} value={voice.value}>
-              {voice.name} ({voice.gender})
-            </option>
-          ))}
-        </select>
+        {!isReading && (
+          <select 
+            className={styles.voiceSelect}
+            value={selectedVoice}
+            onChange={handleVoiceChange}
+            aria-label="Select voice"
+          >
+            {voices.map(voice => (
+              <option key={voice.value} value={voice.value}>
+                {voice.name} ({voice.gender})
+              </option>
+            ))}
+          </select>
+        )}
         <button 
           className={styles.button}
           onClick={handleReadPage}
