@@ -454,6 +454,8 @@ export default function PDFViewer({ file }) {
         switch (message.type) {
           case 'init':
             console.log('Conversation initialized');
+            setIsCallActive(true);
+            setIsConnecting(false);
             mediaRecorder.current = new MediaRecorder(streamRef.current, {
               mimeType: 'audio/webm;codecs=opus'
             });
@@ -621,9 +623,10 @@ export default function PDFViewer({ file }) {
           className={styles.button}
           onClick={handleCall}
           type="button"
-          aria-label="Start call"
+          disabled={isConnecting}
+          aria-label={isCallActive ? "End call" : "Start call"}
         >
-          Call
+          {isConnecting ? 'Connecting...' : isCallActive ? 'End Call' : 'Call'}
         </button>
       </div>
     </div>
