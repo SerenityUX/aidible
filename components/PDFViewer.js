@@ -82,6 +82,7 @@ export default function PDFViewer({ file }) {
   const audioContextRef = useRef(null);
   const sourceBufferRef = useRef([]);
   const currentRequestIdRef = useRef('');
+  const [volumeLevel, setVolumeLevel] = useState(1);
 
   const handlePauseResume = useCallback(() => {
     if (!audioRef.current) return;
@@ -174,6 +175,7 @@ export default function PDFViewer({ file }) {
       stopReading();
 
       audioRef.current = new Audio();
+      audioRef.current.volume = volumeLevel;
       const mediaSource = new MediaSource();
       mediaSourceRef.current = mediaSource;
       const sourceUrl = URL.createObjectURL(mediaSource);
@@ -292,7 +294,7 @@ export default function PDFViewer({ file }) {
       console.error('Error reading PDF text:', error);
       stopReading();
     }
-  }, [file, pageNumber, isReading, stopReading, selectedVoice]);
+  }, [file, pageNumber, isReading, stopReading, selectedVoice, volumeLevel]);
 
   const handleDocumentLoadSuccess = useCallback(({ numPages }) => {
     stopReading();
@@ -357,24 +359,73 @@ export default function PDFViewer({ file }) {
 
   // Remove the duplicate cleanupCall declaration and keep only one:
   const cleanupCall = useCallback(() => {
-    if (wsRef.current) {
-      wsRef.current.close();
-      wsRef.current = null;
+    try {
+      // Close WebSocket connection
+      if (wsRef.current) {
+        wsRef.current.close();
+        wsRef.current = null;
+      }
+
+      // Stop all media tracks
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(track => {
+          track.stop();
+          track.enabled = false;
+        });
+        streamRef.current = null;
+      }
+
+      // Stop media recorder
+      if (mediaRecorder.current) {
+        if (mediaRecorder.current.state !== 'inactive') {
+          mediaRecorder.current.stop();
+        }
+        mediaRecorder.current = null;
+      }
+
+      // Clear audio context
+      if (audioContextRef.current) {
+        audioContextRef.current.close();
+        audioContextRef.current = null;
+      }
+
+      // Clear audio buffers and chunks
+      audioChunksRef.current = [];
+      audioBufferRef.current = [];
+      sourceBufferRef.current = [];
+
+      // Clear any existing audio
+      if (audioRef.current) {
+        audioRef.current.pause();
+        const currentSrc = audioRef.current.src;
+        audioRef.current.src = '';
+        audioRef.current.load();
+        if (currentSrc) {
+          URL.revokeObjectURL(currentSrc);
+        }
+      }
+
+      // Reset request ID
+      currentRequestIdRef.current = '';
+
+      // Reset all states
+      setIsCallActive(false);
+      setIsConnecting(false);
+
+      // Make API call to cleanup agent
+      fetch('/api/agent/cleanup', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          requestId: currentRequestIdRef.current
+        })
+      }).catch(err => console.error('Error cleaning up agent:', err));
+
+    } catch (error) {
+      console.error('Error during cleanup:', error);
     }
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach(track => track.stop());
-      streamRef.current = null;
-    }
-    if (mediaRecorder.current) {
-      mediaRecorder.current.stop();
-      mediaRecorder.current = null;
-    }
-    if (audioContextRef.current) {
-      audioContextRef.current.close();
-      audioContextRef.current = null;
-    }
-    setIsCallActive(false);
-    setIsConnecting(false);
   }, []);
 
   // Then define handleCall
@@ -485,6 +536,7 @@ export default function PDFViewer({ file }) {
               audioRef.current.pause();
               audioRef.current.src = '';
               audioRef.current = new Audio();
+              audioRef.current.volume = volumeLevel;
             }
             break;
 
@@ -506,6 +558,7 @@ export default function PDFViewer({ file }) {
               
               if (!audioRef.current) {
                 audioRef.current = new Audio();
+                audioRef.current.volume = volumeLevel;
               }
               
               const oldSrc = audioRef.current.src;
@@ -564,7 +617,17 @@ export default function PDFViewer({ file }) {
       console.error('Error setting up call:', error);
       cleanupCall();
     }
-  }, [file, pageNumber, isReading, isPaused, handlePauseResume, selectedVoice, isCallActive, cleanupCall]);
+  }, [file, pageNumber, isReading, isPaused, handlePauseResume, selectedVoice, isCallActive, cleanupCall, volumeLevel]);
+
+  const handleVolumeChange = useCallback((e) => {
+    const newVolume = parseFloat(e.target.value) / 100;
+    setVolumeLevel(newVolume);
+    
+    // Update audio element volume if it exists
+    if (audioRef.current) {
+      audioRef.current.volume = newVolume;
+    }
+  }, []);
 
   if (error) {
     return <div>Error loading PDF: {error.message}</div>;
@@ -603,7 +666,7 @@ export default function PDFViewer({ file }) {
         >
           Next
         </button>
-        {!isReading && (
+        {!isReading && !isCallActive && (
           <select 
             className={styles.voiceSelect}
             value={selectedVoice}
@@ -621,6 +684,7 @@ export default function PDFViewer({ file }) {
           className={styles.button}
           onClick={handleReadPage}
           type="button"
+          disabled={isCallActive}
           aria-label={isReading ? "Stop reading" : "Read page content"}
         >
           {isReading ? 'Stop Reading' : 'Read'}
@@ -644,6 +708,20 @@ export default function PDFViewer({ file }) {
         >
           {isConnecting ? 'Connecting...' : isCallActive ? 'End Call' : 'Call'}
         </button>
+        <div className={styles.volumeControl}>
+          <input
+            type="range"
+            min="0"
+            max="100"
+            value={volumeLevel * 100}
+            onChange={handleVolumeChange}
+            className={styles.volumeSlider}
+            aria-label="Volume control"
+          />
+          <span className={styles.volumeLabel}>
+            {Math.round(volumeLevel * 100)}%
+          </span>
+        </div>
       </div>
     </div>
   );
