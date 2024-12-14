@@ -83,6 +83,7 @@ export default function PDFViewer({ file }) {
   const sourceBufferRef = useRef([]);
   const currentRequestIdRef = useRef('');
   const [volumeLevel, setVolumeLevel] = useState(1);
+  const [controlsShowReading, setControlsShowReading] = useState(false);
 
   const handlePauseResume = useCallback(() => {
     if (!audioRef.current) return;
@@ -299,9 +300,11 @@ export default function PDFViewer({ file }) {
     if (isReading) {
       console.log('Stopping current playback');
       stopReading();
+      setControlsShowReading(false);
       return;
     }
 
+    setControlsShowReading(true);
     setupAudioForPage(pageNumber);
   }, [isReading, stopReading, pageNumber, setupAudioForPage]);
 
@@ -675,7 +678,7 @@ export default function PDFViewer({ file }) {
         >
           Next
         </button>
-        {!isReading && !isCallActive && (
+        {!controlsShowReading && !isCallActive && (
           <select 
             className={styles.voiceSelect}
             value={selectedVoice}
@@ -694,11 +697,11 @@ export default function PDFViewer({ file }) {
           onClick={handleReadPage}
           type="button"
           disabled={isCallActive}
-          aria-label={isReading ? "Stop reading" : "Read page content"}
+          aria-label={controlsShowReading ? "Stop reading" : "Read page content"}
         >
-          {isReading ? 'Stop Reading' : 'Read'}
+          {controlsShowReading ? 'Stop Reading' : 'Read'}
         </button>
-        {isReading && (
+        {controlsShowReading && (
           <button 
             className={styles.button}
             onClick={handlePauseResume}
