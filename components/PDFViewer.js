@@ -66,10 +66,23 @@ export default function PDFViewer({ file }) {
   const [pageNumber, setPageNumber] = useState(1);
   const [error, setError] = useState(null);
   const [isReading, setIsReading] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
   const audioRef = useRef(null);
   const readerRef = useRef(null);
   const mediaSourceRef = useRef(null);
   const [selectedVoice, setSelectedVoice] = useState(voices[0].value);
+
+  const handlePauseResume = useCallback(() => {
+    if (!audioRef.current) return;
+
+    if (audioRef.current.paused) {
+      audioRef.current.play();
+      setIsPaused(false);
+    } else {
+      audioRef.current.pause();
+      setIsPaused(true);
+    }
+  }, []);
 
   const stopReading = useCallback(() => {
     try {
@@ -105,9 +118,11 @@ export default function PDFViewer({ file }) {
       }
 
       setIsReading(false);
+      setIsPaused(false);
     } catch (error) {
       console.error('Error stopping playback:', error);
       setIsReading(false);
+      setIsPaused(false);
     }
   }, []);
 
@@ -291,6 +306,38 @@ export default function PDFViewer({ file }) {
     setSelectedVoice(e.target.value);
   }, []);
 
+  // Add keyboard navigation handler
+  const handleKeyDown = useCallback((e) => {
+    // Ignore if user is typing in an input or if modifier keys are pressed
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT' || 
+        e.ctrlKey || e.altKey || e.shiftKey || e.metaKey) {
+      return;
+    }
+
+    switch (e.key) {
+      case 'ArrowLeft':
+        if (pageNumber > 1) {
+          e.preventDefault();
+          changePage(e, -1);
+        }
+        break;
+      case 'ArrowRight':
+        if (pageNumber < numPages) {
+          e.preventDefault();
+          changePage(e, 1);
+        }
+        break;
+    }
+  }, [pageNumber, numPages, changePage]);
+
+  // Add event listener for keyboard navigation
+  useEffect(() => {
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [handleKeyDown]);
+
   useEffect(() => {
     return () => {
       stopReading();
@@ -354,6 +401,16 @@ export default function PDFViewer({ file }) {
         >
           {isReading ? 'Stop Reading' : 'Read'}
         </button>
+        {isReading && (
+          <button 
+            className={styles.button}
+            onClick={handlePauseResume}
+            type="button"
+            aria-label={isPaused ? "Resume reading" : "Pause reading"}
+          >
+            {isPaused ? 'Resume' : 'Pause'}
+          </button>
+        )}
       </div>
     </div>
   );
