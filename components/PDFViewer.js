@@ -449,7 +449,7 @@ export default function PDFViewer({ file }) {
 
       ws.onmessage = async (event) => {
         const message = JSON.parse(event.data);
-        console.log('Received message type:', message.type);
+        console.log('Received message type:', message.type, message);
         
         switch (message.type) {
           case 'init':
@@ -478,6 +478,7 @@ export default function PDFViewer({ file }) {
             break;
 
           case 'newAudioStream':
+            console.log('New audio stream starting');
             // Clear previous audio data
             sourceBufferRef.current = [];
             if (audioRef.current) {
@@ -489,6 +490,8 @@ export default function PDFViewer({ file }) {
 
           case 'audioStream':
             try {
+              console.log('Received audio chunk, size:', message.data.length);
+              
               // Convert base64 to blob
               const binaryString = atob(message.data);
               const bytes = new Uint8Array(binaryString.length);
@@ -496,10 +499,8 @@ export default function PDFViewer({ file }) {
                 bytes[i] = binaryString.charCodeAt(i);
               }
               
-              // Store the chunk
               sourceBufferRef.current.push(new Blob([bytes], { type: 'audio/mpeg' }));
               
-              // Create and play audio when we have all chunks
               const blob = new Blob(sourceBufferRef.current, { type: 'audio/mpeg' });
               const audioUrl = URL.createObjectURL(blob);
               
@@ -510,10 +511,16 @@ export default function PDFViewer({ file }) {
               const oldSrc = audioRef.current.src;
               audioRef.current.src = audioUrl;
               
+              // Add event listeners for audio completion
+              audioRef.current.onended = () => {
+                console.log('Audio playback completed');
+              };
+
               audioRef.current.oncanplay = () => {
                 if (oldSrc) {
                   URL.revokeObjectURL(oldSrc);
                 }
+                console.log('Audio ready to play, starting playback');
                 audioRef.current.play().catch(console.error);
               };
             } catch (error) {
@@ -522,9 +529,18 @@ export default function PDFViewer({ file }) {
             break;
 
           case 'voiceActivityStart':
+            console.log('AI started speaking');
             if (audioRef.current) {
               audioRef.current.pause();
             }
+            break;
+
+          case 'voiceActivityEnd':
+            console.log('AI finished speaking');
+            break;
+
+          case 'turnEnd':
+            console.log('AI turn ended - complete response received');
             break;
 
           case 'error':
