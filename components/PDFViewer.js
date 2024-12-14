@@ -76,6 +76,12 @@ export default function PDFViewer({ file }) {
   const streamRef = useRef(null);
   const wsRef = useRef(null);
   const mediaRecorder = useRef(null);
+  const audioChunksRef = useRef([]);
+  const audioBufferRef = useRef([]);
+  const isPlayingRef = useRef(false);
+  const audioContextRef = useRef(null);
+  const sourceBufferRef = useRef([]);
+  const currentRequestIdRef = useRef('');
 
   const handlePauseResume = useCallback(() => {
     if (!audioRef.current) return;
@@ -363,6 +369,10 @@ export default function PDFViewer({ file }) {
       mediaRecorder.current.stop();
       mediaRecorder.current = null;
     }
+    if (audioContextRef.current) {
+      audioContextRef.current.close();
+      audioContextRef.current = null;
+    }
     setIsCallActive(false);
     setIsConnecting(false);
   }, []);
@@ -428,32 +438,30 @@ export default function PDFViewer({ file }) {
       const ws = new WebSocket(`wss://api.play.ai/v1/talk/${agent.id}`);
       wsRef.current = ws;
 
-      let isInitialized = false;
-
       ws.onopen = () => {
         console.log('WebSocket connected');
+        // Simple setup as recommended in docs
         ws.send(JSON.stringify({
           type: 'setup',
-          apiKey: process.env.NEXT_PUBLIC_APIKey  // Just use the API key without Bearer
+          apiKey: process.env.NEXT_PUBLIC_APIKey
         }));
       };
 
       ws.onmessage = async (event) => {
         const message = JSON.parse(event.data);
-        console.log('Received message:', message);
+        console.log('Received message type:', message.type);
         
         switch (message.type) {
           case 'init':
             console.log('Conversation initialized');
-            isInitialized = true;
             mediaRecorder.current = new MediaRecorder(streamRef.current, {
-              mimeType: 'audio/webm;codecs=opus',
-              bitsPerSecond: 16000
+              mimeType: 'audio/webm;codecs=opus'
             });
 
             mediaRecorder.current.ondataavailable = async (event) => {
-              if (event.data.size > 0 && wsRef.current?.readyState === WebSocket.OPEN && isInitialized) {
+              if (event.data.size > 0 && wsRef.current?.readyState === WebSocket.OPEN) {
                 const reader = new FileReader();
+                reader.readAsDataURL(event.data);
                 reader.onloadend = () => {
                   const base64data = reader.result.split(',')[1];
                   wsRef.current.send(JSON.stringify({
@@ -461,34 +469,66 @@ export default function PDFViewer({ file }) {
                     data: base64data
                   }));
                 };
-                reader.readAsDataURL(event.data);
               }
             };
 
             mediaRecorder.current.start(250);
             break;
 
+          case 'newAudioStream':
+            // Clear previous audio data
+            sourceBufferRef.current = [];
+            if (audioRef.current) {
+              audioRef.current.pause();
+              audioRef.current.src = '';
+              audioRef.current = new Audio();
+            }
+            break;
+
           case 'audioStream':
             try {
-              // Create audio element for this chunk
-              const audio = new Audio(`data:audio/mp3;base64,${message.data}`);
+              // Convert base64 to blob
+              const binaryString = atob(message.data);
+              const bytes = new Uint8Array(binaryString.length);
+              for (let i = 0; i < binaryString.length; i++) {
+                bytes[i] = binaryString.charCodeAt(i);
+              }
               
-              audio.onended = () => {
-                audio.remove(); // Cleanup
+              // Store the chunk
+              sourceBufferRef.current.push(new Blob([bytes], { type: 'audio/mpeg' }));
+              
+              // Create and play audio when we have all chunks
+              const blob = new Blob(sourceBufferRef.current, { type: 'audio/mpeg' });
+              const audioUrl = URL.createObjectURL(blob);
+              
+              if (!audioRef.current) {
+                audioRef.current = new Audio();
+              }
+              
+              const oldSrc = audioRef.current.src;
+              audioRef.current.src = audioUrl;
+              
+              audioRef.current.oncanplay = () => {
+                if (oldSrc) {
+                  URL.revokeObjectURL(oldSrc);
+                }
+                audioRef.current.play().catch(console.error);
               };
-
-              await audio.play();
             } catch (error) {
-              console.error('Error playing audio:', error);
+              console.error('Error processing audio:', error);
+            }
+            break;
+
+          case 'voiceActivityStart':
+            if (audioRef.current) {
+              audioRef.current.pause();
             }
             break;
 
           case 'error':
-            console.error('WebSocket error message:', message);
+            console.error('WebSocket error:', message);
             cleanupCall();
             break;
-
-          // ... rest of the cases ...
         }
       };
 
