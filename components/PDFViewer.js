@@ -69,11 +69,12 @@ export default function PDFViewer({ file }) {
   const audioRef = useRef(null);
   const readerRef = useRef(null);
   const mediaSourceRef = useRef(null);
+  const [selectedVoice, setSelectedVoice] = useState(voices[0].value);
 
   const stopReading = useCallback(() => {
     try {
       if (readerRef.current) {
-        readerRef.current.cancel('User stopped playback');
+        readerRef.current.cancel();
         readerRef.current = null;
       }
 
@@ -134,7 +135,7 @@ export default function PDFViewer({ file }) {
         },
         body: JSON.stringify({
           text: text,
-          voice: voices[0].value,
+          voice: selectedVoice,
           speed: 1.0
         })
       });
@@ -164,7 +165,7 @@ export default function PDFViewer({ file }) {
           const cleanup = () => {
             isStopped = true;
             if (readerRef.current) {
-              readerRef.current.cancel('Stream ended');
+              readerRef.current.cancel();
               readerRef.current = null;
             }
           };
@@ -197,12 +198,6 @@ export default function PDFViewer({ file }) {
             if (!isStopped) {
               appendNextChunk();
             }
-          });
-
-          sourceBuffer.addEventListener('error', (error) => {
-            console.error('SourceBuffer error:', error);
-            cleanup();
-            stopReading();
           });
 
           const readChunks = async () => {
@@ -250,7 +245,7 @@ export default function PDFViewer({ file }) {
         }
       });
 
-      // Set up event listeners only if audioRef.current exists
+      // Set up event listeners
       if (audioRef.current) {
         audioRef.current.onplay = () => {
           console.log('Audio playback started');
@@ -263,7 +258,6 @@ export default function PDFViewer({ file }) {
         };
 
         audioRef.current.onerror = () => {
-          // Just call stopReading to clean up
           stopReading();
         };
       }
@@ -272,7 +266,7 @@ export default function PDFViewer({ file }) {
       console.error('Error reading PDF text:', error);
       stopReading();
     }
-  }, [file, pageNumber, isReading, stopReading]);
+  }, [file, pageNumber, isReading, stopReading, selectedVoice]);
 
   const handleDocumentLoadSuccess = useCallback(({ numPages }) => {
     stopReading();
@@ -292,6 +286,10 @@ export default function PDFViewer({ file }) {
     stopReading();
     setPageNumber(prev => Math.min(Math.max(1, prev + offset), numPages));
   }, [numPages, stopReading]);
+
+  const handleVoiceChange = useCallback((e) => {
+    setSelectedVoice(e.target.value);
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -336,6 +334,18 @@ export default function PDFViewer({ file }) {
         >
           Next
         </button>
+        <select 
+          className={styles.voiceSelect}
+          value={selectedVoice}
+          onChange={handleVoiceChange}
+          aria-label="Select voice"
+        >
+          {voices.map(voice => (
+            <option key={voice.value} value={voice.value}>
+              {voice.name} ({voice.gender})
+            </option>
+          ))}
+        </select>
         <button 
           className={styles.button}
           onClick={handleReadPage}
