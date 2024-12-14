@@ -67,13 +67,46 @@ export default function PDFViewer({ file }) {
   const [error, setError] = useState(null);
   const [isReading, setIsReading] = useState(false);
   const audioRef = useRef(new Audio());
+  const readerRef = useRef(null);
+  const mediaSourceRef = useRef(null);
 
   const stopReading = useCallback(() => {
-    if (audioRef.current) {
-      audioRef.current.pause();
-      audioRef.current.src = '';
+    try {
+      if (readerRef.current) {
+        readerRef.current.cancel();
+        readerRef.current = null;
+      }
+
+      if (mediaSourceRef.current) {
+        try {
+          if (mediaSourceRef.current.readyState === 'open') {
+            mediaSourceRef.current.endOfStream();
+          }
+          mediaSourceRef.current = null;
+        } catch (e) {
+          console.warn('MediaSource cleanup error:', e);
+        }
+      }
+
+      if (audioRef.current) {
+        const currentSrc = audioRef.current.src;
+        audioRef.current.pause();
+        audioRef.current.src = '';
+        audioRef.current.load();
+        if (currentSrc) {
+          try {
+            URL.revokeObjectURL(currentSrc);
+          } catch (e) {
+            console.warn('URL cleanup error:', e);
+          }
+        }
+      }
+
+      setIsReading(false);
+    } catch (error) {
+      console.error('Error stopping playback:', error);
+      setIsReading(false);
     }
-    setIsReading(false);
   }, []);
 
   const handleReadPage = useCallback(async (e) => {
@@ -110,77 +143,92 @@ export default function PDFViewer({ file }) {
         throw new Error(errorData.error || 'Failed to get audio stream');
       }
 
-      // Clean up previous audio
-      if (audioRef.current) {
-        console.log('Cleaning up previous audio element');
-        audioRef.current.pause();
-        URL.revokeObjectURL(audioRef.current.src);
-        audioRef.current = new Audio();
-      }
+      stopReading();
 
-      // Create a MediaSource
       const mediaSource = new MediaSource();
+      mediaSourceRef.current = mediaSource;
       const sourceUrl = URL.createObjectURL(mediaSource);
       audioRef.current.src = sourceUrl;
 
       mediaSource.addEventListener('sourceopen', () => {
-        const sourceBuffer = mediaSource.addSourceBuffer('audio/mpeg');
-        const reader = response.body.getReader();
-        const chunks = [];
-        let isFirstChunk = true;
+        try {
+          const sourceBuffer = mediaSource.addSourceBuffer('audio/mpeg');
+          const reader = response.body.getReader();
+          readerRef.current = reader;
+          const chunks = [];
+          let isFirstChunk = true;
+          let isStopped = false;
 
-        // Function to append a chunk to the source buffer
-        const appendNextChunk = async () => {
-          if (chunks.length === 0 || sourceBuffer.updating) return;
+          const appendNextChunk = async () => {
+            if (chunks.length === 0 || sourceBuffer.updating || isStopped) return;
 
-          try {
-            const chunk = chunks.shift();
-            sourceBuffer.appendBuffer(chunk);
+            try {
+              const chunk = chunks.shift();
+              sourceBuffer.appendBuffer(chunk);
 
-            // Start playing after first chunk is appended
-            if (isFirstChunk) {
-              isFirstChunk = false;
-              audioRef.current.play().catch(console.error);
+              if (isFirstChunk) {
+                isFirstChunk = false;
+                audioRef.current?.play().catch(console.error);
+              }
+            } catch (error) {
+              if (error.name !== 'InvalidStateError') {
+                console.error('Error appending chunk:', error);
+              }
             }
-          } catch (error) {
-            console.error('Error appending chunk:', error);
-          }
-        };
+          };
 
-        // Listen for when the buffer finishes updating
-        sourceBuffer.addEventListener('updateend', () => {
-          appendNextChunk();
-        });
+          sourceBuffer.addEventListener('updateend', () => {
+            if (!isStopped) {
+              appendNextChunk();
+            }
+          });
 
-        // Read chunks
-        const readChunks = async () => {
-          try {
-            while (true) {
-              const { done, value } = await reader.read();
+          const readChunks = async () => {
+            try {
+              while (!isStopped) {
+                const { done, value } = await reader.read();
 
-              if (done) {
-                // No more chunks to read
-                if (chunks.length === 0 && !sourceBuffer.updating) {
-                  mediaSource.endOfStream();
+                if (done) {
+                  if (chunks.length === 0 && !sourceBuffer.updating && mediaSource.readyState === 'open') {
+                    mediaSource.endOfStream();
+                  }
+                  break;
                 }
-                break;
-              }
 
-              chunks.push(value);
-              if (!sourceBuffer.updating) {
-                appendNextChunk();
+                if (!readerRef.current || isStopped) {
+                  break;
+                }
+
+                chunks.push(value);
+                if (!sourceBuffer.updating) {
+                  appendNextChunk();
+                }
+              }
+            } catch (error) {
+              if (error.name !== 'AbortError') {
+                console.error('Streaming error:', error);
+                if (mediaSource.readyState === 'open') {
+                  mediaSource.endOfStream('error');
+                }
               }
             }
-          } catch (error) {
-            console.error('Streaming error:', error);
-            mediaSource.endOfStream('error');
-          }
-        };
+          };
 
-        readChunks();
+          mediaSource.addEventListener('sourceended', () => {
+            isStopped = true;
+          });
+
+          mediaSource.addEventListener('sourceclose', () => {
+            isStopped = true;
+          });
+
+          readChunks();
+        } catch (error) {
+          console.error('Error setting up MediaSource:', error);
+          stopReading();
+        }
       });
 
-      // Set up event listeners
       audioRef.current.onplay = () => {
         console.log('Audio playback started');
         setIsReading(true);
@@ -188,8 +236,7 @@ export default function PDFViewer({ file }) {
 
       audioRef.current.onended = () => {
         console.log('Audio playback ended');
-        setIsReading(false);
-        URL.revokeObjectURL(sourceUrl);
+        stopReading();
       };
 
       audioRef.current.onerror = (e) => {
@@ -198,13 +245,12 @@ export default function PDFViewer({ file }) {
           errorCode: audioRef.current.error?.code,
           errorMessage: audioRef.current.error?.message
         });
-        setIsReading(false);
-        URL.revokeObjectURL(sourceUrl);
+        stopReading();
       };
 
     } catch (error) {
       console.error('Error reading PDF text:', error);
-      setIsReading(false);
+      stopReading();
     }
   }, [file, pageNumber, isReading, stopReading]);
 
@@ -227,12 +273,11 @@ export default function PDFViewer({ file }) {
     setPageNumber(prev => Math.min(Math.max(1, prev + offset), numPages));
   }, [numPages, stopReading]);
 
-  // Cleanup on unmount
   useEffect(() => {
     return () => {
       stopReading();
     };
-  }, [stopReading]);
+  }, [stopReading, pageNumber, file]);
 
   if (error) {
     return <div>Error loading PDF: {error.message}</div>;
