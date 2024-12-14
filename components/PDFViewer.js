@@ -9,7 +9,7 @@ import styles from "@/styles/components/PDFViewer.module.css";
 // Initialize PDF.js worker
 pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@3.6.172/legacy/build/pdf.worker.min.js`;
 
-export default function PDFViewer({ file }) {
+export default function PDFViewer({ file, onClose = () => {} }) {
 
   const voices = [{
     name: 'Angelo',
@@ -84,6 +84,7 @@ export default function PDFViewer({ file }) {
   const currentRequestIdRef = useRef('');
   const [volumeLevel, setVolumeLevel] = useState(1);
   const [controlsShowReading, setControlsShowReading] = useState(false);
+  const [pdfTitle, setPdfTitle] = useState('');
 
   const handlePauseResume = useCallback(() => {
     if (!audioRef.current) return;
@@ -308,12 +309,37 @@ export default function PDFViewer({ file }) {
     setupAudioForPage(pageNumber);
   }, [isReading, stopReading, pageNumber, setupAudioForPage]);
 
-  const handleDocumentLoadSuccess = useCallback(({ numPages }) => {
+  const handleDocumentLoadSuccess = useCallback(async ({ numPages }) => {
     stopReading();
     setNumPages(numPages);
     setPageNumber(1);
     setError(null);
-  }, [stopReading]);
+    
+    try {
+      const pdf = await pdfjs.getDocument(file).promise;
+      const metadata = await pdf.getMetadata();
+      
+      // Get title from metadata, or fall back to filename
+      let title = metadata?.info?.Title;
+      
+      if (!title) {
+        // If file is a Blob/File object, use its name
+        if (file instanceof Blob) {
+          title = file.name;
+        } 
+        // If file is a URL/string, extract filename
+        else if (typeof file === 'string') {
+          const urlParts = file.split('/');
+          title = urlParts[urlParts.length - 1];
+        }
+      }
+      
+      setPdfTitle(title || 'Untitled PDF');
+    } catch (error) {
+      console.warn('Error getting PDF title:', error);
+      setPdfTitle('Untitled PDF');
+    }
+  }, [file, stopReading]);
 
   const handleDocumentLoadError = useCallback((error) => {
     stopReading();
@@ -641,98 +667,137 @@ export default function PDFViewer({ file }) {
     }
   }, []);
 
+  const handleClose = useCallback(() => {
+    stopReading(); // Stop any audio playback
+    onClose(); // Only call if provided
+  }, [stopReading, onClose]);
+
   if (error) {
     return <div>Error loading PDF: {error.message}</div>;
   }
 
   return (
-    <div className={styles.container}>
-      <Document
-        file={file}
-        onLoadSuccess={handleDocumentLoadSuccess}
-        onLoadError={handleDocumentLoadError}
-        loading={<div>Loading PDF...</div>}
-      >
-        <PDFPage pageNumber={pageNumber} />
-      </Document>
-      
-      <div className={styles.controls}>
-        <button 
-          className={styles.button}
-          onClick={(e) => changePage(e, -1)} 
-          disabled={pageNumber <= 1}
-          type="button"
-          aria-label="Previous page"
-        >
-          Back
-        </button>
-        <span className={styles.pageInfo} aria-label={`Page ${pageNumber} of ${numPages}`}>
-          {pageNumber}/{numPages}
-        </span>
-        <button 
-          className={styles.button}
-          onClick={(e) => changePage(e, 1)} 
-          disabled={pageNumber >= numPages}
-          type="button"
-          aria-label="Next page"
-        >
-          Next
-        </button>
-        {!controlsShowReading && !isCallActive && (
-          <select 
-            className={styles.voiceSelect}
-            value={selectedVoice}
-            onChange={handleVoiceChange}
-            aria-label="Select voice"
+    <div className={styles.mainContainer}>
+      <div className={styles.topBar}>
+        <div style={{display: "flex", justifyContent: "space-between", width: "100%", maxWidth: 600}} className={styles.titleContainer}>
+          <button 
+            onClick={handleClose}
+            className={styles.closeButton}
+            aria-label="Close PDF viewer"
           >
-            {voices.map(voice => (
-              <option key={voice.value} value={voice.value}>
-                {voice.name} ({voice.gender})
-              </option>
-            ))}
-          </select>
-        )}
-        <button 
-          className={styles.button}
-          onClick={handleReadPage}
-          type="button"
-          disabled={isCallActive}
-          aria-label={controlsShowReading ? "Stop reading" : "Read page content"}
-        >
-          {controlsShowReading ? 'Stop Reading' : 'Read'}
-        </button>
-        {controlsShowReading && (
+            <svg 
+              width="16" 
+              height="16" 
+              viewBox="0 0 24 24" 
+              fill="none" 
+              xmlns="http://www.w3.org/2000/svg"
+            >
+              <path 
+                d="M18 6L6 18M6 6L18 18" 
+                stroke="currentColor" 
+                strokeWidth="2" 
+                strokeLinecap="round" 
+                strokeLinejoin="round"
+              />
+            </svg>
+          </button>
+          {pdfTitle}
+          <div style={{height: 16, width: 16,}}>
+            {/* holds space, ignore */}
+          </div>
+        </div>
+      </div>
+      <div className={styles.pdfContainer}>
+        <div className={styles.contentWrapper}>
+          <Document
+            file={file}
+            onLoadSuccess={handleDocumentLoadSuccess}
+            onLoadError={handleDocumentLoadError}
+            loading={<div>Loading PDF...</div>}
+          >
+            <PDFPage pageNumber={pageNumber} />
+          </Document>
+        </div>
+      </div>
+      <div className={styles.bottomBar}>
+        <div className={styles.controls}>
           <button 
             className={styles.button}
-            onClick={handlePauseResume}
+            onClick={(e) => changePage(e, -1)} 
+            disabled={pageNumber <= 1}
             type="button"
-            aria-label={isPaused ? "Resume reading" : "Pause reading"}
+            aria-label="Previous page"
           >
-            {isPaused ? 'Resume' : 'Pause'}
+            Back
           </button>
-        )}
-        <button 
-          className={styles.button}
-          onClick={handleCall}
-          type="button"
-          disabled={isConnecting}
-          aria-label={isCallActive ? "End call" : "Start call"}
-        >
-          {isConnecting ? 'Connecting...' : isCallActive ? 'End Call' : 'Call'}
-        </button>
-        <div className={styles.volumeControl}>
-          <input
-            type="range"
-            min="0"
-            max="100"
-            value={volumeLevel * 100}
-            onChange={handleVolumeChange}
-            className={styles.volumeSlider}
-            aria-label="Volume control"
-          />
-          <span className={styles.volumeLabel}>
-            {Math.round(volumeLevel * 100)}%
+          <span className={styles.pageInfo} aria-label={`Page ${pageNumber} of ${numPages}`}>
+            {pageNumber}/{numPages}
           </span>
+          <button 
+            className={styles.button}
+            onClick={(e) => changePage(e, 1)} 
+            disabled={pageNumber >= numPages}
+            type="button"
+            aria-label="Next page"
+          >
+            Next
+          </button>
+          {!controlsShowReading && !isCallActive && (
+            <select 
+              className={styles.voiceSelect}
+              value={selectedVoice}
+              onChange={handleVoiceChange}
+              aria-label="Select voice"
+            >
+              {voices.map(voice => (
+                <option key={voice.value} value={voice.value}>
+                  {voice.name} ({voice.gender})
+                </option>
+              ))}
+            </select>
+          )}
+          <button 
+            className={styles.button}
+            onClick={handleReadPage}
+            type="button"
+            disabled={isCallActive}
+            aria-label={controlsShowReading ? "Stop reading" : "Read page content"}
+          >
+            {controlsShowReading ? 'Stop Reading' : 'Read'}
+          </button>
+          {controlsShowReading && (
+            <button 
+              className={styles.button}
+              onClick={handlePauseResume}
+              type="button"
+              aria-label={isPaused ? "Resume reading" : "Pause reading"}
+            >
+              {isPaused ? 'Resume' : 'Pause'}
+            </button>
+          )}
+          <button 
+            className={styles.button}
+            onClick={handleCall}
+            type="button"
+            disabled={isConnecting}
+            aria-label={isCallActive ? "End call" : "Start call"}
+          >
+            {isConnecting ? 'Connecting...' : isCallActive ? 'End Call' : 'Call'}
+          </button>
+          <div className={styles.volumeControl}>
+            <input
+              type="range"
+              min="0"
+              max="100"
+              value={volumeLevel * 100}
+              onChange={handleVolumeChange}
+              className={styles.volumeSlider}
+              aria-label="Volume control"
+            />
+            <span className={styles.volumeLabel}>
+              {Math.round(volumeLevel * 100)}%
+            </span>
+          </div>
         </div>
       </div>
     </div>
