@@ -198,34 +198,50 @@ export default function PDFViewer({ file, onClose = () => {} }) {
       const reader = response.body.getReader();
       let totalSize = 0;
       
-      mediaSourceRef.current.addEventListener('sourceopen', () => {
+      mediaSource.addEventListener('sourceopen', () => {
         try {
-          const sourceBuffer = mediaSourceRef.current.addSourceBuffer('audio/mpeg');
+          const sourceBuffer = mediaSource.addSourceBuffer('audio/mpeg');
           readerRef.current = reader;
           const chunks = [];
           let isFirstChunk = true;
           let isStopped = false;
           let isStreamComplete = false;
           let lastChunkTime = Date.now();
+          let isCleaningUp = false;  // Add cleanup state
 
-          // Add chunk timeout checker
+          const cleanup = () => {
+            if (isCleaningUp) return;  // Prevent multiple cleanups
+            isCleaningUp = true;
+            
+            clearInterval(chunkTimeoutChecker);
+            isStopped = true;
+
+            try {
+              if (readerRef.current) {
+                readerRef.current.cancel();
+                readerRef.current = null;
+              }
+            } catch (e) {
+              console.warn('Reader cleanup error:', e);
+            }
+          };
+
+          // Update chunk timeout checker
           const chunkTimeoutChecker = setInterval(() => {
-            if (Date.now() - lastChunkTime > 10000 && !isStreamComplete) {
-              console.error('Chunk timeout - no chunks received for 10s');
-              clearInterval(chunkTimeoutChecker);
+            const timeSinceLastChunk = Date.now() - lastChunkTime;
+            if (timeSinceLastChunk > 10000 && !isStreamComplete && !isPaused && !isCleaningUp) {
+              console.log('Chunk timeout detected', {
+                timeSinceLastChunk,
+                isStreamComplete,
+                isPaused,
+                buffered: sourceBuffer.buffered.length ? 
+                  `${sourceBuffer.buffered.start(0)} - ${sourceBuffer.buffered.end(0)}` : 
+                  'empty'
+              });
               cleanup();
               stopReading();
             }
           }, 1000);
-
-          const cleanup = () => {
-            clearInterval(chunkTimeoutChecker);
-            isStopped = true;
-            if (readerRef.current) {
-              readerRef.current.cancel();
-              readerRef.current = null;
-            }
-          };
 
           const appendNextChunk = async () => {
             if (chunks.length === 0 || sourceBuffer.updating || isStopped) return;
@@ -248,21 +264,21 @@ export default function PDFViewer({ file, onClose = () => {} }) {
                 try {
                   await ttsAudioRef.current?.play();
                 } catch (error) {
-                  console.error('Error starting playback:', error);
-                  cleanup();
-                  stopReading();
+                  if (error.name !== 'AbortError') {
+                    console.error('Error starting playback:', error);
+                    cleanup();
+                    stopReading();
+                  }
                   return;
                 }
               }
 
               if (chunks.length === 0 && isStreamComplete && !sourceBuffer.updating && totalSize > 1000) {
                 console.log('All chunks processed, total size:', totalSize);
-                setTimeout(() => {
-                  if (mediaSourceRef.current.readyState === 'open') {
-                    console.log('Ending media stream');
-                    mediaSourceRef.current.endOfStream();
-                  }
-                }, 500);
+                if (mediaSource?.readyState === 'open') {
+                  console.log('Ending media stream');
+                  mediaSource.endOfStream();
+                }
               }
             } catch (error) {
               console.error('Error appending chunk:', error);
@@ -271,6 +287,7 @@ export default function PDFViewer({ file, onClose = () => {} }) {
             }
           };
 
+          // Add updateend event listener
           sourceBuffer.addEventListener('updateend', () => {
             if (!isStopped) {
               appendNextChunk();
@@ -278,42 +295,30 @@ export default function PDFViewer({ file, onClose = () => {} }) {
           });
 
           const readChunks = async () => {
-            const startTime = Date.now();
-            let lastChunkTime = startTime;
-            
             try {
               while (!isStopped) {
                 const { done, value } = await reader.read();
-                const now = Date.now();
-                console.log('Chunk timing:', {
-                  sinceStart: now - startTime,
-                  sinceLastChunk: now - lastChunkTime,
-                  chunkSize: value?.length
-                });
-                lastChunkTime = now;
 
                 if (done) {
                   console.log('Stream complete, marking as finished');
                   isStreamComplete = true;
                   if (chunks.length === 0 && !sourceBuffer.updating) {
                     console.log('No more chunks to process, ending stream');
-                    if (mediaSourceRef.current.readyState === 'open') {
-                      mediaSourceRef.current.endOfStream();
+                    if (mediaSource?.readyState === 'open') {
+                      mediaSource.endOfStream();
                     }
                   }
                   break;
                 }
 
-                if (!readerRef.current || isStopped) {
-                  cleanup();
-                  break;
-                }
+                if (isCleaningUp) break;  // Stop if cleaning up
 
+                lastChunkTime = Date.now();
                 chunks.push(value);
                 console.log('Chunk received, length:', value?.length);
                 console.log('Chunks in queue:', chunks.length);
                 console.log('Source buffer updating:', sourceBuffer.updating);
-                console.log('MediaSource readyState:', mediaSourceRef.current.readyState);
+                console.log('MediaSource readyState:', mediaSource?.readyState);
                 console.log('Stream complete:', isStreamComplete);
 
                 if (!sourceBuffer.updating) {
@@ -321,23 +326,50 @@ export default function PDFViewer({ file, onClose = () => {} }) {
                 }
               }
             } catch (error) {
-              if (error.name !== 'AbortError') {
+              if (!isCleaningUp) {  // Only handle error if not already cleaning up
                 console.error('Streaming error:', error);
-                if (mediaSourceRef.current.readyState === 'open') {
-                  mediaSourceRef.current.endOfStream('error');
-                }
+                cleanup();
+                stopReading();
               }
-              cleanup();
-              stopReading();
             }
           };
 
-          mediaSourceRef.current.addEventListener('sourceended', () => {
-            console.log('MediaSource ended, cleaning up');
-            cleanup();
-          });
+          // Update audio event handlers
+          if (ttsAudioRef.current) {
+            ttsAudioRef.current.onplay = () => {
+              console.log('Audio playback started');
+              setIsReading(true);
+            };
 
-          mediaSourceRef.current.addEventListener('sourceclose', cleanup);
+            ttsAudioRef.current.onended = async () => {
+              if (isCleaningUp) return;  // Don't handle if cleaning up
+              
+              console.log('Audio playback ended', {
+                currentTime: ttsAudioRef.current?.currentTime,
+                duration: ttsAudioRef.current?.duration,
+                isStreamComplete,
+                mediaSourceState: mediaSource?.readyState
+              });
+
+              if (mediaSource?.readyState === 'ended' && isStreamComplete) {
+                if (pageNum < numPages) {
+                  const nextPageNumber = pageNum + 1;
+                  setPageNumber(nextPageNumber);
+                  setupAudioForPage(nextPageNumber);
+                } else {
+                  stopReading();
+                }
+              } else if (!isStreamComplete) {
+                try {
+                  await ttsAudioRef.current?.play();
+                } catch (error) {
+                  if (error.name !== 'AbortError') {
+                    console.error('Error restarting playback:', error);
+                  }
+                }
+              }
+            };
+          }
 
           readChunks();
         } catch (error) {
@@ -356,10 +388,17 @@ export default function PDFViewer({ file, onClose = () => {} }) {
         ttsAudioRef.current.onended = async () => {
           console.log('Audio playback ended');
           
-          await new Promise(resolve => setTimeout(resolve, 100));
+          // Check if we've actually played through the whole audio
+          const audioElement = ttsAudioRef.current;
+          const hasPlayedThrough = audioElement && 
+            Math.abs(audioElement.currentTime - audioElement.duration) < 0.5; // Within 0.5s of end
           
-          if (mediaSourceRef.current?.readyState === 'ended' && isStreamComplete) {
-            console.log('MediaSource ended and stream complete, moving to next page if available');
+          if (mediaSource && mediaSource.readyState === 'ended' && isStreamComplete && hasPlayedThrough) {
+            console.log('Audio fully played, moving to next page if available', {
+              currentTime: audioElement?.currentTime,
+              duration: audioElement?.duration
+            });
+            
             if (pageNum < numPages) {
               const nextPageNumber = pageNum + 1;
               setPageNumber(nextPageNumber);
@@ -368,10 +407,16 @@ export default function PDFViewer({ file, onClose = () => {} }) {
               stopReading();
             }
           } else {
-            console.log('Audio ended but stream not complete, restarting playback');
+            console.log('Audio ended but not finished playing through, restarting from current position', {
+              currentTime: audioElement?.currentTime,
+              duration: audioElement?.duration,
+              readyState: mediaSource?.readyState,
+              isStreamComplete
+            });
+            
             try {
-              if (ttsAudioRef.current && !isStreamComplete) {
-                await ttsAudioRef.current.play();
+              if (audioElement && !isStreamComplete) {
+                await audioElement.play();
               }
             } catch (error) {
               if (error.name !== 'AbortError') {
@@ -397,7 +442,7 @@ export default function PDFViewer({ file, onClose = () => {} }) {
       console.error('Error setting up audio for page:', error);
       stopReading();
     }
-  }, [file, numPages, selectedVoice, stopReading, volumeLevel]);
+  }, [file, numPages, selectedVoice, stopReading, volumeLevel, isPaused]);
 
   const handleReadPage = useCallback(async (e) => {
     e?.preventDefault();
