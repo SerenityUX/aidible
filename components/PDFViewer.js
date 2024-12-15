@@ -551,7 +551,7 @@ export default function PDFViewer({ file, onClose = () => {} }) {
         // Simple setup as recommended in docs
         ws.send(JSON.stringify({
           type: 'setup',
-          apiKey: process.env.NEXT_PUBLIC_APIKey
+          apiKey: process.env.APIKey
         }));
       };
 
@@ -717,7 +717,7 @@ export default function PDFViewer({ file, onClose = () => {} }) {
             file={file}
             onLoadSuccess={handleDocumentLoadSuccess}
             onLoadError={handleDocumentLoadError}
-            loading={<div>Loading PDF...</div>}
+            loading={<div></div>}
           >
             <PDFPage pageNumber={pageNumber} />
           </Document>

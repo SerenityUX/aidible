@@ -9,7 +9,7 @@ import dynamic from "next/dynamic";
 // Import PDFViewer with no SSR
 const PDFViewer = dynamic(() => import("../components/PDFViewer"), {
   ssr: false,
-  loading: () => <p>Loading PDF viewer...</p>,
+  loading: () => <p></p>,
 });
 
 export default function Home() {

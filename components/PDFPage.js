@@ -25,7 +25,7 @@ function PDFPage({ pageNumber }) {
       <Page
         key={pageNumber}
         pageNumber={pageNumber}
-        loading={<div>Loading page...</div>}
+        loading={<div></div>}
         scale={scale}
         onLoadSuccess={handlePageLoadSuccess}
         renderAnnotationLayer={false}
