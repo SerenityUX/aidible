@@ -251,49 +251,24 @@ export default function PDFViewer({ file, onClose = () => {} }) {
             try {
               const chunk = chunks.shift();
               
-              // First chunk should be the count
-              if (expectedTotalChunks.current === 0) {
-                const countBuffer = Buffer.from(chunk);
-                expectedTotalChunks.current = countBuffer.readUInt32LE(0);
-                console.log(`Expecting ${expectedTotalChunks.current} audio chunks total`);
-                return;
-              }
-              
               // Check for EOF marker
               if (chunk.length === 4 && 
                   chunk[0] === 0xFF && 
                   chunk[1] === 0xFF && 
                   chunk[2] === 0xFF && 
                   chunk[3] === 0xFF) {
-                console.log('EOF marker received, checking completion:', {
-                  received: chunksReceived.current,
-                  expected: expectedTotalChunks.current
-                });
-                
-                if (chunksReceived.current === expectedTotalChunks.current) {
-                  console.log('All chunks received and verified');
-                  isStreamComplete = true;
-                  if (!sourceBuffer.updating && mediaSourceRef.current?.readyState === 'open') {
-                    mediaSourceRef.current.endOfStream();
-                  }
-                } else {
-                  console.warn('Chunk count mismatch - waiting for more chunks');
+                console.log('EOF marker received');
+                isStreamComplete = true;
+                if (!sourceBuffer.updating && mediaSourceRef.current?.readyState === 'open') {
+                  mediaSourceRef.current.endOfStream();
                 }
                 return;
               }
 
               // Normal chunk processing
-              chunksReceived.current++;
               sourceBuffer.appendBuffer(chunk);
               
-              console.log('Processing audio chunk:', {
-                current: chunksReceived.current,
-                expected: expectedTotalChunks.current,
-                size: chunk.byteLength,
-                remaining: chunks.length
-              });
-
-              // Start playback on first actual chunk
+              // Start playback on first chunk
               if (isFirstChunk) {
                 isFirstChunk = false;
                 try {
@@ -328,18 +303,7 @@ export default function PDFViewer({ file, onClose = () => {} }) {
               while (true) {
                 const { value, done } = await reader.read();
                 
-                if (done) {
-                  console.log('Stream complete, marking as finished');
-                  isStreamComplete = true;
-                  
-                  if (chunks.length === 0 && !sourceBuffer.updating) {
-                    console.log('No more chunks to process, ending stream');
-                    if (mediaSourceRef.current?.readyState === 'open') {
-                      mediaSourceRef.current.endOfStream();
-                    }
-                  }
-                  break;
-                }
+                if (done) break;  // Just break the loop when done
 
                 if (isCleaningUp) break;  // Stop if cleaning up
 
@@ -377,17 +341,6 @@ export default function PDFViewer({ file, onClose = () => {} }) {
               const duration = buffered.length ? buffered.end(buffered.length - 1) : 0;
               const currentTime = audioElement?.currentTime || 0;
               
-              console.log('Audio ended check:', {
-                currentTime,
-                duration,
-                bufferedRanges: buffered.length ? 
-                  Array.from({length: buffered.length}, (_, i) => 
-                    `${buffered.start(i)}-${buffered.end(i)}`
-                  ) : [],
-                isStreamComplete,
-                readyState: mediaSourceRef.current?.readyState
-              });
-
               // If we haven't played through the whole audio yet, resume
               if (currentTime < duration - 0.1) {
                 try {
