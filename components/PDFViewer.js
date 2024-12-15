@@ -169,6 +169,9 @@ export default function PDFViewer({ file, onClose = () => {} }) {
   const [pdfTitle, setPdfTitle] = useState('');
   const chunksReceived = useRef(0);
   const expectedTotalChunks = useRef(0);
+  const audioBufferTimeoutRef = useRef(null);
+  const lastChunkTimeRef = useRef(null);
+  const [isBuffering, setIsBuffering] = useState(false);
 
   useEffect(() => {
     console.log('Runtime:', {
@@ -686,7 +689,7 @@ export default function PDFViewer({ file, onClose = () => {} }) {
 
       ws.onmessage = async (event) => {
         const message = JSON.parse(event.data);
-        console.log('Received message type:', message.type, message);
+        console.log('Received message type:', message.type);
         
         switch (message.type) {
           case 'init':
@@ -720,13 +723,13 @@ export default function PDFViewer({ file, onClose = () => {} }) {
 
           case 'newAudioStream':
             console.log('New audio stream starting');
-            // Clear previous audio data for AI response
-            sourceBufferRef.current = [];
-            // Create a new audio element only for AI responses
-            if (!callAudioRef.current || !isReading) {
-              callAudioRef.current = new Audio();
-              callAudioRef.current.volume = volumeLevel;
+            // Clear previous audio and stop any existing playback
+            if (callAudioRef.current) {
+              callAudioRef.current.pause();
+              callAudioRef.current.src = '';
             }
+            sourceBufferRef.current = [];
+            setIsBuffering(true);
             break;
 
           case 'audioStream':
@@ -741,29 +744,41 @@ export default function PDFViewer({ file, onClose = () => {} }) {
               }
               
               sourceBufferRef.current.push(new Blob([bytes], { type: 'audio/mpeg' }));
-              
-              const blob = new Blob(sourceBufferRef.current, { type: 'audio/mpeg' });
-              const audioUrl = URL.createObjectURL(blob);
-              
-              if (!callAudioRef.current) {
-                callAudioRef.current = new Audio();
-                callAudioRef.current.volume = volumeLevel;
-              }
-              
-              const oldSrc = callAudioRef.current.src;
-              callAudioRef.current.src = audioUrl;
-              
-              callAudioRef.current.onended = () => {
-                console.log('Call audio playback completed');
-              };
+              lastChunkTimeRef.current = Date.now();
 
-              callAudioRef.current.oncanplay = () => {
-                if (oldSrc) {
-                  URL.revokeObjectURL(oldSrc);
+              // Clear any existing timeout
+              if (audioBufferTimeoutRef.current) {
+                clearTimeout(audioBufferTimeoutRef.current);
+              }
+
+              // Set new timeout to check if we've stopped receiving chunks
+              audioBufferTimeoutRef.current = setTimeout(() => {
+                if (Date.now() - lastChunkTimeRef.current >= 500) { // 500ms without new chunks
+                  // Play the accumulated audio
+                  const blob = new Blob(sourceBufferRef.current, { type: 'audio/mpeg' });
+                  const audioUrl = URL.createObjectURL(blob);
+                  
+                  if (!callAudioRef.current) {
+                    callAudioRef.current = new Audio();
+                  }
+                  callAudioRef.current.volume = volumeLevel;
+                  
+                  const oldSrc = callAudioRef.current.src;
+                  callAudioRef.current.src = audioUrl;
+                  
+                  callAudioRef.current.onended = () => {
+                    console.log('Call audio playback completed');
+                    if (oldSrc) {
+                      URL.revokeObjectURL(oldSrc);
+                    }
+                  };
+
+                  callAudioRef.current.oncanplay = () => {
+                    setIsBuffering(false);
+                    callAudioRef.current.play().catch(console.error);
+                  };
                 }
-                // Always play call audio, regardless of TTS pause state
-                callAudioRef.current.play().catch(console.error);
-              };
+              }, 500);
             } catch (error) {
               console.error('Error processing call audio:', error);
             }
@@ -771,9 +786,13 @@ export default function PDFViewer({ file, onClose = () => {} }) {
 
           case 'voiceActivityStart':
             console.log('AI started speaking');
+            // Stop any existing audio playback
+            if (callAudioRef.current) {
+              callAudioRef.current.pause();
+              callAudioRef.current.src = '';
+            }
             if (ttsAudioRef.current && !isPaused) {
               ttsAudioRef.current.pause();
-              console.log('DEBUG: Setting isPaused to true via voiceActivityStart');
               setIsPaused(true);
             }
             break;
