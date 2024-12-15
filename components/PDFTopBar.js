@@ -1,8 +1,17 @@
 import styles from "@/styles/components/PDFViewer.module.css";
 
-export default function PDFTopBar({ pdfTitle, onClose }) {
+export default function PDFTopBar({ pdfTitle, onClose, stopPlaying, setControlsShowReading }) {
   return (
-    <div className={styles.topBar}>
+    <div 
+      className={styles.topBar}
+      onKeyDown={(e) => {
+        if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+          stopPlaying();
+          setControlsShowReading(false);
+        }
+      }}
+      tabIndex={0}
+    >
       <div style={{display: "flex", justifyContent: "space-between", width: "100%", maxWidth: 600}} className={styles.titleContainer}>
         <button 
           onClick={onClose}

@@ -53,7 +53,10 @@
 }
 
 .button {
-  padding: 4px 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px;
   cursor: pointer;
 }
 
@@ -62,8 +65,18 @@
   opacity: 0.5;
 }
 
+.button img {
+  color: currentColor;
+}
+
 .pageInfo {
   font-size: 14px;
+  opacity: 0.5;
+  transition: opacity 0.2s ease;
+}
+
+.pageInfo:hover {
+  opacity: 1;
 }
 
 .volumeControl {
@@ -153,3 +166,264 @@
 .closeButton:hover {
   color: #333;
 }
+
+.audioControls {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.controlIcon {
+  cursor: pointer;
+  /* animation: popIn 0.3s cubic-bezier(0.68, -0.55, 0.265, 1.55) forwards; */
+  transform-origin: center;
+}
+
+/* .controlIcon.exit {
+  animation: popOut 0.3s cubic-bezier(0.68, -0.55, 0.265, 1.55) forwards;
+} */
+
+/* @keyframes popIn {
+  0% {
+    transform: scale(0);
+    opacity: 0;
+  }
+  70% {
+    transform: scale(1.1);
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+@keyframes popOut {
+  0% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  30% {
+    transform: scale(1.1);
+  }
+  100% {
+    transform: scale(0);
+    opacity: 0;
+  }
+} */
+
+.disabled {
+  opacity: 0.25 !important;
+  pointer-events: none;
+}
+
+.navButton {
+  opacity: 0.5;
+  transition: opacity 0.2s ease;
+}
+
+.navButton:hover {
+  opacity: 1;
+}
+
+.callButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px;
+  border-radius: 50%;
+  transition: background-color 0.2s ease;
+}
+
+.callButton:hover {
+  background-color: rgba(0, 0, 0, 0.02);
+}
+
+.callButton.disabled {
+  cursor: default;
+  pointer-events: none;
+}
+
+.volumeIconContainer {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  cursor: pointer;
+}
+
+.volumePopup {
+  position: absolute;
+  bottom: 48px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: white;
+  padding: 12px;
+  border-radius: 8px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  min-width: 150px;
+  z-index: 1000;
+}
+
+.volumePopup::after {
+  content: '';
+  position: absolute;
+  bottom: -8px;
+  left: 50%;
+  transform: translateX(-50%);
+  border-left: 8px solid transparent;
+  border-right: 8px solid transparent;
+  border-top: 8px solid white;
+}
+
+.volumeSlider {
+  width: 100%;
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  background: #ddd;
+  border-radius: 2px;
+  outline: none;
+}
+
+.volumeSlider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  background: #9333EA;
+  border-radius: 50%;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.volumeSlider::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  background: #9333EA;
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.volumeLabel {
+  font-size: 12px;
+  color: #666;
+}
+
+.voiceIconContainer {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  cursor: pointer;
+}
+
+.voicePopup {
+  position: absolute;
+  bottom: 48px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: white;
+  padding: 8px;
+  border-radius: 8px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 240px;
+  z-index: 1000;
+}
+
+.voicePopup::after {
+  content: '';
+  position: absolute;
+  bottom: -8px;
+  left: 50%;
+  transform: translateX(-50%);
+  border-left: 8px solid transparent;
+  border-right: 8px solid transparent;
+  border-top: 8px solid white;
+}
+
+.voiceOption {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 5px 7px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background-color 0.2s ease, border-color 0.2s ease;
+  gap: 8px;
+}
+
+.voiceOption:hover {
+  background-color: rgba(147, 51, 234, 0.02);
+}
+
+.selectedVoice {
+  background-color: rgba(147, 51, 234, 0.05);
+  border: 1px solid #9333EA;
+}
+
+.voiceInfo {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.voiceName {
+  font-size: 13px;
+  font-weight: 500;
+  color: #333;
+}
+
+.voiceDetails {
+  font-size: 11px;
+  color: #666;
+}
+
+/* Create a shared base class for icon containers */
+.iconContainer {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  cursor: pointer;
+  border-radius: 50%;
+  transition: background-color 0.2s ease;
+}
+
+.iconContainer:hover {
+  background-color: rgba(0, 0, 0, 0.02);
+}
+
+/* Update existing containers to use the base class */
+.volumeIconContainer {
+  composes: iconContainer;
+}
+
+.voiceIconContainer {
+  composes: iconContainer;
+}
+
+.callButton {
+  composes: iconContainer;
+}
+
+/* Remove duplicate styles */
+.callButton:hover {
+  /* Remove this since it's inherited from iconContainer */
+}
+

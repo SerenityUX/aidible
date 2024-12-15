@@ -359,6 +359,7 @@ export default function PDFViewer({ file, onClose = () => {} }) {
   const changePage = useCallback((e, offset) => {
     e.preventDefault();
     stopReading();
+    setControlsShowReading(false);
     setPageNumber(prev => Math.min(Math.max(1, prev + offset), numPages));
   }, [numPages, stopReading]);
 
@@ -387,8 +388,16 @@ export default function PDFViewer({ file, onClose = () => {} }) {
           changePage(e, 1);
         }
         break;
+      case ' ': // Space key
+        e.preventDefault(); // Prevent page scrolling
+        if (isReading) {
+          handlePauseResume();
+        } else {
+          handleReadPage(e);
+        }
+        break;
     }
-  }, [pageNumber, numPages, changePage]);
+  }, [pageNumber, numPages, changePage, isReading, handlePauseResume, handleReadPage]);
 
   // Add event listener for keyboard navigation
   useEffect(() => {
@@ -698,7 +707,9 @@ export default function PDFViewer({ file, onClose = () => {} }) {
     <div className={styles.mainContainer}>
       <PDFTopBar 
         pdfTitle={pdfTitle} 
-        onClose={handleClose} 
+        onClose={handleClose}
+        stopPlaying={stopReading}
+        setControlsShowReading={setControlsShowReading}
       />
       <div className={styles.pdfContainer}>
         <div className={styles.contentWrapper}>
