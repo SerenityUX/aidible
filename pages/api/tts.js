@@ -66,14 +66,11 @@ async function getAudioForChunk(chunk, voice) {
   return response;
 }
 
-// Add delay helper
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
-// Helper to estimate audio duration from chunk size
-function estimateAudioDuration(chunkSize) {
-  // MP3 bitrate is typically 128kbps = 16KB/s
-  // So 16KB = 1 second of audio
-  return (chunkSize / 16000); // Returns duration in seconds
+// Play.ai uses 24kHz sample rate, roughly 3KB/s for speech
+function estimateChunkDuration(chunkSize) {
+  return (chunkSize / 3000) * 1000; // Convert to milliseconds
 }
 
 export default async function handler(req, res) {
@@ -88,41 +85,34 @@ export default async function handler(req, res) {
     
     res.setHeader('Content-Type', 'audio/mpeg');
 
-    let totalDuration = 0;
-
+    // Process each chunk sequentially with much longer delays
     for (const chunk of textChunks) {
       console.log('Processing chunk:', chunk.substring(0, 50) + '...');
       
       const response = await getAudioForChunk(chunk, req.body.voice);
       const reader = response.body.getReader();
-      let chunkBuffer = [];
 
-      // First collect all the data for this audio segment
+      // Stream this chunk's audio to the response with longer delays
       while (true) {
         const { done, value } = await reader.read();
-        if (done) break;
-        chunkBuffer.push(value);
+        
+        if (done) {
+          // Much longer delay between chunks - 2 seconds
+          await delay(2000);
+          break;
+        }
+        
+        // Write chunk to response
+        res.write(Buffer.from(value));
+
+        // Add delay based on chunk size
+        const chunkDuration = estimateChunkDuration(value.length);
+        await delay(chunkDuration); // Wait approximately the full duration
       }
-
-      // Calculate total size and estimated duration
-      const totalSize = chunkBuffer.reduce((sum, arr) => sum + arr.length, 0);
-      const estimatedDuration = estimateAudioDuration(totalSize);
-      totalDuration += estimatedDuration;
-
-      // Now stream the data with controlled delays
-      for (const buffer of chunkBuffer) {
-        // Add delay proportional to the buffer size
-        const bufferDuration = estimateAudioDuration(buffer.length);
-        await delay(bufferDuration * 500); // Wait for half the estimated play time
-        res.write(Buffer.from(buffer));
-      }
-
-      // Add delay between chunks
-      await delay(1000); // 1 second between chunks
     }
 
-    // Add final delay proportional to total audio length
-    await delay(Math.min(totalDuration * 1000, 5000)); // Cap at 5 seconds
+    // Add longer final delay - 5 seconds
+    await delay(5000);
     res.end();
 
   } catch (error) {
