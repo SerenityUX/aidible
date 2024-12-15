@@ -41,9 +41,7 @@
 .bottomBar {
   background: #fff;
   border-top: 1px solid #e0e0e0;
-  padding: 0.5rem;
-  padding-bottom: 1rem;
-  padding-top: 2;
+  padding: 2px 0.5rem 1rem;
   z-index: 10;
 }
 
