@@ -17,39 +17,42 @@ const MIN_SENTENCE_LENGTH = 50; // Minimum characters for a "full" sentence
 // Add this constant at the top
 const PRELOAD_AHEAD = 3; // Number of sentences to prepare in advance
 
-const groupSentences = (sentences) => {
+const groupSentences = (text) => {
+  // First clean up the text - replace multiple spaces/newlines with single space
+  const cleanText = text.replace(/\s+/g, ' ').trim();
+  
+  // Split into sentences more carefully
+  const rawSentences = cleanText.split(/(?<=[.!?])\s+/);
   const groups = [];
   let currentGroup = [];
-  let currentLength = 0;
 
-  sentences.forEach((sentence) => {
+  rawSentences.forEach((sentence) => {
     const trimmedSentence = sentence.trim();
     
-    // Skip empty or whitespace-only sentences
+    // Skip empty sentences
     if (!trimmedSentence) return;
 
-    // If it's a very short sentence or just a title/header (no punctuation)
-    if (trimmedSentence.length < MIN_SENTENCE_LENGTH || !trimmedSentence.match(/[.!?]$/)) {
+    if (trimmedSentence.length < MIN_SENTENCE_LENGTH) {
       currentGroup.push(trimmedSentence);
-      currentLength += trimmedSentence.length;
     } else {
-      // If we have pending short sentences, add this one and push the group
       if (currentGroup.length > 0) {
         currentGroup.push(trimmedSentence);
         groups.push(currentGroup.join(' '));
         currentGroup = [];
-        currentLength = 0;
       } else {
-        // It's a normal length sentence, push it as its own group
         groups.push(trimmedSentence);
       }
     }
   });
 
-  // Add any remaining sentences
   if (currentGroup.length > 0) {
     groups.push(currentGroup.join(' '));
   }
+
+  // Debug log
+  groups.forEach((group, i) => {
+    console.log(`Group ${i + 1}:`, group.substring(0, 100) + '...');
+  });
 
   return groups;
 };
@@ -210,9 +213,8 @@ export default function PDFViewer({ file, onClose = () => {} }) {
       const textContent = await page.getTextContent();
       const text = textContent.items.map(item => item.str).join(' ');
 
-      // Split text into sentences and group them
-      const rawSentences = text.match(/[^.!?]+[.!?]+[\s\n]*/g) || [];
-      const sentences = groupSentences(rawSentences);
+      // Group the text into sentence groups directly
+      const sentences = groupSentences(text);
       console.log(`Found ${sentences.length} sentence groups`);
       
       if (sentences.length === 0) {
