@@ -88,6 +88,7 @@ export default function PDFViewer({ file, onClose = () => {} }) {
   const [volumeLevel, setVolumeLevel] = useState(1);
   const [controlsShowReading, setControlsShowReading] = useState(false);
   const [pdfTitle, setPdfTitle] = useState('');
+  const isStreamCompleteRef = useRef(false);
 
   const handlePauseResume = useCallback(() => {
     if (!ttsAudioRef.current) return;
@@ -151,6 +152,9 @@ export default function PDFViewer({ file, onClose = () => {} }) {
 
   const setupAudioForPage = useCallback(async (pageNum) => {
     try {
+      // Reset stream complete flag when starting new page
+      isStreamCompleteRef.current = false;
+
       // Get text from PDF first
       const pdf = await pdfjs.getDocument(file).promise;
       const page = await pdf.getPage(pageNum);
@@ -194,11 +198,10 @@ export default function PDFViewer({ file, onClose = () => {} }) {
           const chunks = [];
           let isFirstChunk = true;
           let isStopped = false;
-          let isStreamComplete = false;
 
-          // Add chunk timeout checker
+          // Update chunk timeout checker
           const chunkTimeoutChecker = setInterval(() => {
-            if (Date.now() - lastChunkTime > 10000 && !isStreamComplete && !isPaused) {
+            if (Date.now() - lastChunkTime > 10000 && !isStreamCompleteRef.current && !isPaused) {
               console.error('Chunk timeout - no chunks received for 10s');
               clearInterval(chunkTimeoutChecker);
               cleanup();
@@ -251,7 +254,7 @@ export default function PDFViewer({ file, onClose = () => {} }) {
               }
 
               // Only end stream if we have received a minimum amount of data AND all chunks are processed AND stream is complete
-              if (chunks.length === 0 && isStreamComplete && !sourceBuffer.updating && totalSize > 1000) {
+              if (chunks.length === 0 && isStreamCompleteRef.current && !sourceBuffer.updating && totalSize > 1000) {
                 console.log('All chunks processed, total size:', totalSize);
                 if (mediaSource.readyState === 'open') {
                   console.log('Ending media stream');
@@ -278,7 +281,7 @@ export default function PDFViewer({ file, onClose = () => {} }) {
 
                 if (done) {
                   console.log('Stream complete, marking as finished');
-                  isStreamComplete = true;
+                  isStreamCompleteRef.current = true;
                   if (chunks.length === 0 && !sourceBuffer.updating) {
                     console.log('No more chunks to process, ending stream');
                     if (mediaSource.readyState === 'open') {
@@ -294,7 +297,7 @@ export default function PDFViewer({ file, onClose = () => {} }) {
                 console.log('Chunks in queue:', chunks.length);
                 console.log('Source buffer updating:', sourceBuffer.updating);
                 console.log('MediaSource readyState:', mediaSource.readyState);
-                console.log('Stream complete:', isStreamComplete);
+                console.log('Stream complete:', isStreamCompleteRef.current);
 
                 if (!sourceBuffer.updating) {
                   appendNextChunk();
@@ -335,8 +338,8 @@ export default function PDFViewer({ file, onClose = () => {} }) {
         ttsAudioRef.current.onended = async () => {
           console.log('Audio playback ended');
           
-          // Check if we have a valid MediaSource and if it's actually ended
-          if (mediaSourceRef.current?.readyState === 'ended' && isStreamComplete) {
+          // Now we can safely access isStreamComplete
+          if (mediaSourceRef.current?.readyState === 'ended' && isStreamCompleteRef.current) {
             console.log('MediaSource ended and stream complete, moving to next page if available');
             if (pageNum < numPages) {
               const nextPageNumber = pageNum + 1;
@@ -347,9 +350,8 @@ export default function PDFViewer({ file, onClose = () => {} }) {
             }
           } else {
             console.log('Audio ended but stream not complete, restarting playback');
-            // Try to restart playback if the stream isn't complete
             try {
-              if (ttsAudioRef.current && !isStreamComplete) {
+              if (ttsAudioRef.current && !isStreamCompleteRef.current) {
                 await ttsAudioRef.current.play();
               }
             } catch (error) {
@@ -372,7 +374,7 @@ export default function PDFViewer({ file, onClose = () => {} }) {
       console.error('Error setting up audio for page:', error);
       stopReading();
     }
-  }, [file, numPages, selectedVoice, stopReading, volumeLevel]);
+  }, [file, numPages, selectedVoice, stopReading, volumeLevel, isPaused]);
 
   const handleReadPage = useCallback(async (e) => {
     e?.preventDefault();
