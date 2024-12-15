@@ -234,10 +234,14 @@ export default function PDFViewer({ file, onClose = () => {} }) {
                 const { done, value } = await reader.read();
 
                 if (done) {
-                  if (chunks.length === 0 && !sourceBuffer.updating && mediaSource.readyState === 'open') {
-                    mediaSource.endOfStream();
+                  if (chunks.length === 0 && !sourceBuffer.updating) {
+                    setTimeout(() => {
+                      if (mediaSource.readyState === 'open') {
+                        mediaSource.endOfStream();
+                      }
+                      cleanup();
+                    }, 100);
                   }
-                  cleanup();
                   break;
                 }
 
@@ -250,6 +254,11 @@ export default function PDFViewer({ file, onClose = () => {} }) {
                 if (!sourceBuffer.updating) {
                   appendNextChunk();
                 }
+
+                console.log('Chunk received, length:', value?.length);
+                console.log('Chunks in queue:', chunks.length);
+                console.log('Source buffer updating:', sourceBuffer.updating);
+                console.log('MediaSource readyState:', mediaSource.readyState);
               }
             } catch (error) {
               if (error.name !== 'AbortError') {
