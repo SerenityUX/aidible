@@ -5,6 +5,8 @@ import { Document, Page } from "react-pdf";
 import { pdfjs } from "react-pdf";
 import PDFPage from "./PDFPage";
 import styles from "@/styles/components/PDFViewer.module.css";
+import PDFTopBar from './PDFTopBar';
+import PDFBottomBar from './PDFBottomBar';
 
 // Initialize PDF.js worker
 pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@3.6.172/legacy/build/pdf.worker.min.js`;
@@ -67,7 +69,8 @@ export default function PDFViewer({ file, onClose = () => {} }) {
   const [error, setError] = useState(null);
   const [isReading, setIsReading] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
-  const audioRef = useRef(null);
+  const ttsAudioRef = useRef(null);
+  const callAudioRef = useRef(null);
   const readerRef = useRef(null);
   const mediaSourceRef = useRef(null);
   const [selectedVoice, setSelectedVoice] = useState(voices[0].value);
@@ -87,18 +90,18 @@ export default function PDFViewer({ file, onClose = () => {} }) {
   const [pdfTitle, setPdfTitle] = useState('');
 
   const handlePauseResume = useCallback(() => {
-    if (!audioRef.current) return;
+    if (!ttsAudioRef.current) return;
 
-    if (audioRef.current.paused) {
-      audioRef.current.play();
+    if (ttsAudioRef.current.paused) {
+      ttsAudioRef.current.play();
       setIsPaused(false);
     } else {
-      audioRef.current.pause();
+      ttsAudioRef.current.pause();
       setIsPaused(true);
     }
   }, []);
 
-  const stopReading = useCallback(() => {
+  const stopReading = useCallback((preservePauseState = false) => {
     try {
       if (readerRef.current) {
         readerRef.current.cancel();
@@ -116,11 +119,11 @@ export default function PDFViewer({ file, onClose = () => {} }) {
         }
       }
 
-      if (audioRef.current) {
-        audioRef.current.pause();
-        const currentSrc = audioRef.current.src;
-        audioRef.current.src = '';
-        audioRef.current.load();
+      if (ttsAudioRef.current) {
+        ttsAudioRef.current.pause();
+        const currentSrc = ttsAudioRef.current.src;
+        ttsAudioRef.current.src = '';
+        ttsAudioRef.current.load();
         if (currentSrc) {
           try {
             URL.revokeObjectURL(currentSrc);
@@ -128,15 +131,21 @@ export default function PDFViewer({ file, onClose = () => {} }) {
             console.warn('URL cleanup error:', e);
           }
         }
-        audioRef.current = null;
+        ttsAudioRef.current = null;
       }
 
       setIsReading(false);
-      setIsPaused(false);
+      if (!preservePauseState) {
+        console.log('DEBUG: Setting isPaused to false via stopReading');
+        setIsPaused(false);
+      }
     } catch (error) {
       console.error('Error stopping playback:', error);
       setIsReading(false);
-      setIsPaused(false);
+      if (!preservePauseState) {
+        console.log('DEBUG: Setting isPaused to false via stopReading error handler');
+        setIsPaused(false);
+      }
     }
   }, []);
 
@@ -165,12 +174,12 @@ export default function PDFViewer({ file, onClose = () => {} }) {
 
       stopReading();
 
-      audioRef.current = new Audio();
-      audioRef.current.volume = volumeLevel;
+      ttsAudioRef.current = new Audio();
+      ttsAudioRef.current.volume = volumeLevel;
       const mediaSource = new MediaSource();
       mediaSourceRef.current = mediaSource;
       const sourceUrl = URL.createObjectURL(mediaSource);
-      audioRef.current.src = sourceUrl;
+      ttsAudioRef.current.src = sourceUrl;
 
       mediaSource.addEventListener('sourceopen', () => {
         try {
@@ -198,7 +207,7 @@ export default function PDFViewer({ file, onClose = () => {} }) {
 
               if (isFirstChunk) {
                 isFirstChunk = false;
-                audioRef.current?.play().catch(error => {
+                ttsAudioRef.current?.play().catch(error => {
                   console.error('Error starting playback:', error);
                   cleanup();
                   stopReading();
@@ -265,13 +274,13 @@ export default function PDFViewer({ file, onClose = () => {} }) {
       });
 
       // Set up event listeners
-      if (audioRef.current) {
-        audioRef.current.onplay = () => {
+      if (ttsAudioRef.current) {
+        ttsAudioRef.current.onplay = () => {
           console.log('Audio playback started');
           setIsReading(true);
         };
 
-        audioRef.current.onended = async () => {
+        ttsAudioRef.current.onended = async () => {
           console.log('Audio playback ended');
           
           // If there's a next page, move to it and start reading
@@ -284,7 +293,7 @@ export default function PDFViewer({ file, onClose = () => {} }) {
           }
         };
 
-        audioRef.current.onerror = () => {
+        ttsAudioRef.current.onerror = () => {
           stopReading();
         };
       }
@@ -432,21 +441,22 @@ export default function PDFViewer({ file, onClose = () => {} }) {
       audioBufferRef.current = [];
       sourceBufferRef.current = [];
 
-      // Clear any existing audio
-      if (audioRef.current) {
-        audioRef.current.pause();
-        const currentSrc = audioRef.current.src;
-        audioRef.current.src = '';
-        audioRef.current.load();
+      // Clear only call audio
+      if (callAudioRef.current) {
+        callAudioRef.current.pause();
+        const currentSrc = callAudioRef.current.src;
+        callAudioRef.current.src = '';
+        callAudioRef.current.load();
         if (currentSrc) {
           URL.revokeObjectURL(currentSrc);
         }
+        callAudioRef.current = null;
       }
 
       // Reset request ID
       currentRequestIdRef.current = '';
 
-      // Reset all states
+      // Reset call states only
       setIsCallActive(false);
       setIsConnecting(false);
 
@@ -468,14 +478,14 @@ export default function PDFViewer({ file, onClose = () => {} }) {
 
   // Then define handleCall
   const handleCall = useCallback(async () => {
+    // Pause reading immediately when call button is clicked
+    if (isReading && !isPaused) {
+      handlePauseResume();
+    }
+
     if (isCallActive) {
       cleanupCall();
       return;
-    }
-
-    // If audio is playing, pause it
-    if (isReading && !isPaused) {
-      handlePauseResume();
     }
 
     try {
@@ -545,6 +555,10 @@ export default function PDFViewer({ file, onClose = () => {} }) {
             console.log('Conversation initialized');
             setIsCallActive(true);
             setIsConnecting(false);
+            if (isReading && !isPaused) {
+              console.log('DEBUG: Setting isPaused to true via WebSocket init');
+              setIsPaused(true);
+            }
             mediaRecorder.current = new MediaRecorder(streamRef.current, {
               mimeType: 'audio/webm;codecs=opus'
             });
@@ -568,13 +582,12 @@ export default function PDFViewer({ file, onClose = () => {} }) {
 
           case 'newAudioStream':
             console.log('New audio stream starting');
-            // Clear previous audio data
+            // Clear previous audio data for AI response
             sourceBufferRef.current = [];
-            if (audioRef.current) {
-              audioRef.current.pause();
-              audioRef.current.src = '';
-              audioRef.current = new Audio();
-              audioRef.current.volume = volumeLevel;
+            // Create a new audio element only for AI responses
+            if (!callAudioRef.current || !isReading) {
+              callAudioRef.current = new Audio();
+              callAudioRef.current.volume = volumeLevel;
             }
             break;
 
@@ -594,35 +607,36 @@ export default function PDFViewer({ file, onClose = () => {} }) {
               const blob = new Blob(sourceBufferRef.current, { type: 'audio/mpeg' });
               const audioUrl = URL.createObjectURL(blob);
               
-              if (!audioRef.current) {
-                audioRef.current = new Audio();
-                audioRef.current.volume = volumeLevel;
+              if (!callAudioRef.current) {
+                callAudioRef.current = new Audio();
+                callAudioRef.current.volume = volumeLevel;
               }
               
-              const oldSrc = audioRef.current.src;
-              audioRef.current.src = audioUrl;
+              const oldSrc = callAudioRef.current.src;
+              callAudioRef.current.src = audioUrl;
               
-              // Add event listeners for audio completion
-              audioRef.current.onended = () => {
-                console.log('Audio playback completed');
+              callAudioRef.current.onended = () => {
+                console.log('Call audio playback completed');
               };
 
-              audioRef.current.oncanplay = () => {
+              callAudioRef.current.oncanplay = () => {
                 if (oldSrc) {
                   URL.revokeObjectURL(oldSrc);
                 }
-                console.log('Audio ready to play, starting playback');
-                audioRef.current.play().catch(console.error);
+                // Always play call audio, regardless of TTS pause state
+                callAudioRef.current.play().catch(console.error);
               };
             } catch (error) {
-              console.error('Error processing audio:', error);
+              console.error('Error processing call audio:', error);
             }
             break;
 
           case 'voiceActivityStart':
             console.log('AI started speaking');
-            if (audioRef.current) {
-              audioRef.current.pause();
+            if (ttsAudioRef.current && !isPaused) {
+              ttsAudioRef.current.pause();
+              console.log('DEBUG: Setting isPaused to true via voiceActivityStart');
+              setIsPaused(true);
             }
             break;
 
@@ -662,8 +676,8 @@ export default function PDFViewer({ file, onClose = () => {} }) {
     setVolumeLevel(newVolume);
     
     // Update audio element volume if it exists
-    if (audioRef.current) {
-      audioRef.current.volume = newVolume;
+    if (ttsAudioRef.current) {
+      ttsAudioRef.current.volume = newVolume;
     }
   }, []);
 
@@ -672,41 +686,20 @@ export default function PDFViewer({ file, onClose = () => {} }) {
     onClose(); // Only call if provided
   }, [stopReading, onClose]);
 
+  useEffect(() => {
+    console.log('DEBUG: isPaused state changed to:', isPaused);
+  }, [isPaused]);
+
   if (error) {
     return <div>Error loading PDF: {error.message}</div>;
   }
 
   return (
     <div className={styles.mainContainer}>
-      <div className={styles.topBar}>
-        <div style={{display: "flex", justifyContent: "space-between", width: "100%", maxWidth: 600}} className={styles.titleContainer}>
-          <button 
-            onClick={handleClose}
-            className={styles.closeButton}
-            aria-label="Close PDF viewer"
-          >
-            <svg 
-              width="16" 
-              height="16" 
-              viewBox="0 0 24 24" 
-              fill="none" 
-              xmlns="http://www.w3.org/2000/svg"
-            >
-              <path 
-                d="M18 6L6 18M6 6L18 18" 
-                stroke="currentColor" 
-                strokeWidth="2" 
-                strokeLinecap="round" 
-                strokeLinejoin="round"
-              />
-            </svg>
-          </button>
-          {pdfTitle}
-          <div style={{height: 16, width: 16,}}>
-            {/* holds space, ignore */}
-          </div>
-        </div>
-      </div>
+      <PDFTopBar 
+        pdfTitle={pdfTitle} 
+        onClose={handleClose} 
+      />
       <div className={styles.pdfContainer}>
         <div className={styles.contentWrapper}>
           <Document
@@ -719,87 +712,23 @@ export default function PDFViewer({ file, onClose = () => {} }) {
           </Document>
         </div>
       </div>
-      <div className={styles.bottomBar}>
-        <div className={styles.controls}>
-          <button 
-            className={styles.button}
-            onClick={(e) => changePage(e, -1)} 
-            disabled={pageNumber <= 1}
-            type="button"
-            aria-label="Previous page"
-          >
-            Back
-          </button>
-          <span className={styles.pageInfo} aria-label={`Page ${pageNumber} of ${numPages}`}>
-            {pageNumber}/{numPages}
-          </span>
-          <button 
-            className={styles.button}
-            onClick={(e) => changePage(e, 1)} 
-            disabled={pageNumber >= numPages}
-            type="button"
-            aria-label="Next page"
-          >
-            Next
-          </button>
-          {!controlsShowReading && !isCallActive && (
-            <select 
-              className={styles.voiceSelect}
-              value={selectedVoice}
-              onChange={handleVoiceChange}
-              aria-label="Select voice"
-            >
-              {voices.map(voice => (
-                <option key={voice.value} value={voice.value}>
-                  {voice.name} ({voice.gender})
-                </option>
-              ))}
-            </select>
-          )}
-          <button 
-            className={styles.button}
-            onClick={handleReadPage}
-            type="button"
-            disabled={isCallActive}
-            aria-label={controlsShowReading ? "Stop reading" : "Read page content"}
-          >
-            {controlsShowReading ? 'Stop Reading' : 'Read'}
-          </button>
-          {controlsShowReading && (
-            <button 
-              className={styles.button}
-              onClick={handlePauseResume}
-              type="button"
-              aria-label={isPaused ? "Resume reading" : "Pause reading"}
-            >
-              {isPaused ? 'Resume' : 'Pause'}
-            </button>
-          )}
-          <button 
-            className={styles.button}
-            onClick={handleCall}
-            type="button"
-            disabled={isConnecting}
-            aria-label={isCallActive ? "End call" : "Start call"}
-          >
-            {isConnecting ? 'Connecting...' : isCallActive ? 'End Call' : 'Call'}
-          </button>
-          <div className={styles.volumeControl}>
-            <input
-              type="range"
-              min="0"
-              max="100"
-              value={volumeLevel * 100}
-              onChange={handleVolumeChange}
-              className={styles.volumeSlider}
-              aria-label="Volume control"
-            />
-            <span className={styles.volumeLabel}>
-              {Math.round(volumeLevel * 100)}%
-            </span>
-          </div>
-        </div>
-      </div>
+      <PDFBottomBar 
+        pageNumber={pageNumber}
+        numPages={numPages}
+        changePage={changePage}
+        controlsShowReading={controlsShowReading}
+        isCallActive={isCallActive}
+        selectedVoice={selectedVoice}
+        handleVoiceChange={handleVoiceChange}
+        handleReadPage={handleReadPage}
+        handlePauseResume={handlePauseResume}
+        isPaused={isPaused}
+        handleCall={handleCall}
+        isConnecting={isConnecting}
+        volumeLevel={volumeLevel}
+        handleVolumeChange={handleVolumeChange}
+        voices={voices}
+      />
     </div>
   );
 } 

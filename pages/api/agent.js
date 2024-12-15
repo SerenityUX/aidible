@@ -23,7 +23,6 @@ export default async function handler(req, res) {
         visibility: 'private',
         answerOnlyFromCriticalKnowledge: true,
         voiceSpeed: 1.0,
-        greeting: `Hey, ${voiceName} here. How can I help you understand this page?`,
         prompt: `You are a helpful assistant named ${voiceName}. Your role is to help users understand the content of a document. Be friendly and professional.`,
         criticalKnowledge: pageText.substring(0, 200000)
       })
