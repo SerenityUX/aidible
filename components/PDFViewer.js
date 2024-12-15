@@ -273,7 +273,6 @@ export default function PDFViewer({ file, onClose = () => {} }) {
           body: JSON.stringify({
             text: sentence,
             voice: selectedVoice,
-            speed: 1.0
           })
         });
 
