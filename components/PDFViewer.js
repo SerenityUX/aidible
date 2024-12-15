@@ -15,7 +15,7 @@ pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@3.6.172/lega
 const MIN_SENTENCE_LENGTH = 50; // Minimum characters for a "full" sentence
 
 // Add this constant at the top
-const PRELOAD_AHEAD = 3; // Number of sentences to prepare in advance
+const PRELOAD_AHEAD = 10; // Number of sentences to prepare in advance
 
 const groupSentences = (text) => {
   // First clean up the text - normalize all whitespace and line breaks
