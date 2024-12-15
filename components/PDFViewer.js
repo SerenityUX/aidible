@@ -287,8 +287,15 @@ export default function PDFViewer({ file, onClose = () => {} }) {
             .then(() => {
               setIsReading(true);
               isPlayingRef.current = true;
-              // Start preparing more sentences
-              prepareNextSentences();
+              // Only prepare next sentences if we're not on the first one
+              if (currentSentenceIndex === 0) {
+                // For first sentence, prepare starting from the second sentence
+                currentSentenceIndex = 1;
+                prepareNextSentences();
+                currentSentenceIndex = 0; // Reset back for proper playback
+              } else {
+                prepareNextSentences();
+              }
             })
             .catch(err => {
               console.error('Play failed:', err);
@@ -345,7 +352,6 @@ export default function PDFViewer({ file, onClose = () => {} }) {
 
       // Start with first sentence and prepare others
       const firstAudioData = await getAudioForSentence(firstSentence);
-      prepareNextSentences(); // Start preparing next sentences right away
       await playSentence(firstAudioData);
 
     } catch (error) {
