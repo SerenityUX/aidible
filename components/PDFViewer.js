@@ -255,7 +255,7 @@ export default function PDFViewer({ file, onClose = () => {} }) {
               if (expectedTotalChunks.current === 0) {
                 const countBuffer = Buffer.from(chunk);
                 expectedTotalChunks.current = countBuffer.readUInt32LE(0);
-                console.log(`Expecting ${expectedTotalChunks.current} chunks total`);
+                console.log(`Expecting ${expectedTotalChunks.current} audio chunks total`);
                 return;
               }
               
@@ -273,6 +273,9 @@ export default function PDFViewer({ file, onClose = () => {} }) {
                 if (chunksReceived.current === expectedTotalChunks.current) {
                   console.log('All chunks received and verified');
                   isStreamComplete = true;
+                  if (!sourceBuffer.updating && mediaSourceRef.current?.readyState === 'open') {
+                    mediaSourceRef.current.endOfStream();
+                  }
                 } else {
                   console.warn('Chunk count mismatch - waiting for more chunks');
                 }
@@ -283,7 +286,7 @@ export default function PDFViewer({ file, onClose = () => {} }) {
               chunksReceived.current++;
               sourceBuffer.appendBuffer(chunk);
               
-              console.log('Processing chunk:', {
+              console.log('Processing audio chunk:', {
                 current: chunksReceived.current,
                 expected: expectedTotalChunks.current,
                 size: chunk.byteLength,
@@ -385,19 +388,8 @@ export default function PDFViewer({ file, onClose = () => {} }) {
                 readyState: mediaSourceRef.current?.readyState
               });
 
-              // Only move to next page if we've truly finished
-              if (isStreamComplete && 
-                  mediaSourceRef.current?.readyState === 'ended' && 
-                  Math.abs(currentTime - duration) < 0.5) {
-                if (pageNum < numPages) {
-                  const nextPageNumber = pageNum + 1;
-                  setPageNumber(nextPageNumber);
-                  setupAudioForPage(nextPageNumber);
-                } else {
-                  stopReading();
-                }
-              } else {
-                // If we haven't finished, try to resume
+              // If we haven't played through the whole audio yet, resume
+              if (currentTime < duration - 0.1) {
                 try {
                   await audioElement?.play();
                 } catch (error) {
@@ -405,6 +397,16 @@ export default function PDFViewer({ file, onClose = () => {} }) {
                     console.error('Error restarting playback:', error);
                   }
                 }
+                return;
+              }
+
+              // Only move to next page if we've played through ALL the audio
+              if (pageNum < numPages) {
+                const nextPageNumber = pageNum + 1;
+                setPageNumber(nextPageNumber);
+                setupAudioForPage(nextPageNumber);
+              } else {
+                stopReading();
               }
             };
           }
