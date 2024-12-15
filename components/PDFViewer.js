@@ -253,7 +253,8 @@ export default function PDFViewer({ file, onClose = () => {} }) {
                   `${sourceBuffer.buffered.start(0)} - ${sourceBuffer.buffered.end(0)}` : 
                   'empty',
                 totalSize,
-                chunkSize: chunk.byteLength
+                chunkSize: chunk.byteLength,
+                currentTime: ttsAudioRef.current?.currentTime || 0
               });
               
               sourceBuffer.appendBuffer(chunk);
@@ -273,13 +274,27 @@ export default function PDFViewer({ file, onClose = () => {} }) {
                 }
               }
 
+              // Only end stream if we've received all chunks AND processed them all AND played most of the audio
               if (chunks.length === 0 && isStreamComplete && !sourceBuffer.updating) {
-                setTimeout(() => {
-                  if (mediaSourceRef.current?.readyState === 'open' && !sourceBuffer.updating) {
-                    console.log('All chunks processed and stream complete, ending stream');
+                const audioElement = ttsAudioRef.current;
+                const buffered = sourceBuffer.buffered;
+                const duration = buffered.length ? buffered.end(0) : 0;
+                const currentTime = audioElement?.currentTime || 0;
+                const hasPlayedFully = currentTime >= duration; // Changed to full duration
+
+                console.log('Checking stream completion:', {
+                  currentTime,
+                  duration,
+                  hasPlayedFully,
+                  chunksLeft: chunks.length
+                });
+
+                if (hasPlayedFully) {
+                  console.log('Audio fully played, ending stream');
+                  if (mediaSourceRef.current?.readyState === 'open') {
                     mediaSourceRef.current.endOfStream();
                   }
-                }, 1000);
+                }
               }
             } catch (error) {
               console.error('Error appending chunk:', error);
@@ -344,14 +359,21 @@ export default function PDFViewer({ file, onClose = () => {} }) {
             ttsAudioRef.current.onended = async () => {
               if (isCleaningUp) return;  // Don't handle if cleaning up
               
+              const audioElement = ttsAudioRef.current;
+              const buffered = sourceBuffer.buffered;
+              const duration = buffered.length ? buffered.end(0) : 0;
+              const currentTime = audioElement?.currentTime || 0;
+              const hasPlayedFully = currentTime >= duration; // Changed to full duration
+              
               console.log('Audio playback ended', {
-                currentTime: ttsAudioRef.current?.currentTime,
-                duration: ttsAudioRef.current?.duration,
+                currentTime,
+                duration,
+                hasPlayedFully,
                 isStreamComplete,
-                mediaSourceState: mediaSource?.readyState
+                mediaSourceState: mediaSourceRef.current?.readyState
               });
 
-              if (mediaSource?.readyState === 'ended' && isStreamComplete) {
+              if (mediaSourceRef.current?.readyState === 'ended' && isStreamComplete && hasPlayedFully) {
                 if (pageNum < numPages) {
                   const nextPageNumber = pageNum + 1;
                   setPageNumber(nextPageNumber);
@@ -359,9 +381,9 @@ export default function PDFViewer({ file, onClose = () => {} }) {
                 } else {
                   stopReading();
                 }
-              } else if (!isStreamComplete) {
+              } else if (!hasPlayedFully) {
                 try {
-                  await ttsAudioRef.current?.play();
+                  await audioElement?.play();
                 } catch (error) {
                   if (error.name !== 'AbortError') {
                     console.error('Error restarting playback:', error);
