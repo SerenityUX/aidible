@@ -9,5 +9,6 @@
    - Arrow keys to go forward & backward
    - Space bar to play/pause
 3. Call an AI who has access to the document to get questions answered
+4. Select voice for your reader
 
 Powered by play.ai :)
