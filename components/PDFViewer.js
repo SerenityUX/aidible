@@ -89,6 +89,12 @@ export default function PDFViewer({ file, onClose = () => {} }) {
   const [controlsShowReading, setControlsShowReading] = useState(false);
   const [pdfTitle, setPdfTitle] = useState('');
 
+  useEffect(() => {
+    if (process.env.NODE_ENV === 'development') {
+      console.log('API Key available:', !!process.env.NEXT_PUBLIC_APIKey);
+    }
+  }, []);
+
   const handlePauseResume = useCallback(() => {
     if (!ttsAudioRef.current) return;
 
@@ -542,16 +548,29 @@ export default function PDFViewer({ file, onClose = () => {} }) {
       });
       streamRef.current = stream;
 
+      // In the handleCall function, before setting up WebSocket
+      const authResponse = await fetch('/api/websocket-auth', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        }
+      });
+
+      if (!authResponse.ok) {
+        throw new Error('Failed to get WebSocket authentication');
+      }
+
+      const { apiKey: tempToken } = await authResponse.json();
+
       // Setup WebSocket
       const ws = new WebSocket(`wss://api.play.ai/v1/talk/${agent.id}`);
       wsRef.current = ws;
 
       ws.onopen = () => {
         console.log('WebSocket connected');
-        // Simple setup as recommended in docs
         ws.send(JSON.stringify({
           type: 'setup',
-          apiKey: process.env.APIKey
+          apiKey: tempToken
         }));
       };
 
