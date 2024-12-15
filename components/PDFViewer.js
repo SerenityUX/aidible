@@ -316,6 +316,26 @@ export default function PDFViewer({ file, onClose = () => {} }) {
             if (chunks.length === 0 || sourceBuffer.updating || isStopped) return;
 
             try {
+              // Check if we should process the next chunk yet
+              const audioElement = ttsAudioRef.current;
+              const buffered = sourceBuffer.buffered;
+              if (buffered.length) {
+                const duration = buffered.end(buffered.length - 1);
+                const currentTime = audioElement?.currentTime || 0;
+                const bufferedAhead = duration - currentTime;
+
+                // If we have more than 5 seconds buffered, wait
+                if (bufferedAhead > 5) {
+                  console.log('Throttling chunk processing:', {
+                    currentTime,
+                    bufferedUntil: duration,
+                    bufferedAhead
+                  });
+                  setTimeout(() => appendNextChunk(), 1000);
+                  return;
+                }
+              }
+
               const chunk = chunks.shift();
               
               // Check for EOF marker
@@ -334,6 +354,7 @@ export default function PDFViewer({ file, onClose = () => {} }) {
 
               // Normal chunk processing
               sourceBuffer.appendBuffer(chunk);
+              console.log('Processed chunk, remaining:', chunks.length);
 
               // Start playback on first chunk
               if (isFirstChunk) {
