@@ -248,15 +248,21 @@ export default function PDFViewer({ file, onClose = () => {} }) {
 
             try {
               const chunk = chunks.shift();
-              console.log('Buffer state before append:', {
-                buffered: sourceBuffer.buffered.length ? 
-                  `${sourceBuffer.buffered.start(0)} - ${sourceBuffer.buffered.end(0)}` : 
-                  'empty',
-                totalSize,
-                chunkSize: chunk.byteLength,
-                currentTime: ttsAudioRef.current?.currentTime || 0
-              });
               
+              // Check for EOF marker
+              if (chunk.length === 4 && 
+                  chunk[0] === 0xFF && 
+                  chunk[1] === 0xFF && 
+                  chunk[2] === 0xFF && 
+                  chunk[3] === 0xFF) {
+                console.log('EOF marker received, marking stream as complete');
+                isStreamComplete = true;
+                if (!sourceBuffer.updating && mediaSourceRef.current?.readyState === 'open') {
+                  mediaSourceRef.current.endOfStream();
+                }
+                return;
+              }
+
               sourceBuffer.appendBuffer(chunk);
               totalSize += chunk.byteLength;
 
@@ -373,40 +379,17 @@ export default function PDFViewer({ file, onClose = () => {} }) {
                 mediaSourceState: mediaSourceRef.current?.readyState
               });
 
-              // Only move to next page if ALL conditions are met:
-              // 1. MediaSource is ended
-              // 2. Stream is complete
-              // 3. Audio has played fully
-              // 4. We're not in the middle of cleanup
               if (mediaSourceRef.current?.readyState === 'ended' && 
                   isStreamComplete && 
-                  hasPlayedFully && 
-                  !isCleaningUp) {
-                
-                // Add a final verification delay
-                await delay(1000);
-                
-                // Double check conditions after delay
-                if (audioElement?.currentTime >= (audioElement?.duration || 0)) {
-                  if (pageNum < numPages) {
-                    const nextPageNumber = pageNum + 1;
-                    setPageNumber(nextPageNumber);
-                    setupAudioForPage(nextPageNumber);
-                  } else {
-                    stopReading();
-                  }
+                  hasPlayedFully) {
+                if (pageNum < numPages) {
+                  const nextPageNumber = pageNum + 1;
+                  setPageNumber(nextPageNumber);
+                  setupAudioForPage(nextPageNumber);
                 } else {
-                  // If we haven't actually finished, try to resume playback
-                  try {
-                    await audioElement?.play();
-                  } catch (error) {
-                    if (error.name !== 'AbortError') {
-                      console.error('Error restarting playback:', error);
-                    }
-                  }
+                  stopReading();
                 }
-              } else {
-                // If any condition isn't met, try to resume playback
+              } else if (!hasPlayedFully) {
                 try {
                   await audioElement?.play();
                 } catch (error) {
