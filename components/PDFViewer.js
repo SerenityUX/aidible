@@ -15,7 +15,7 @@ pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@3.6.172/lega
 const MIN_SENTENCE_LENGTH = 50; // Minimum characters for a "full" sentence
 
 // Add this constant at the top
-const PRELOAD_AHEAD = 3; // Number of sentences to prepare in advance
+const PRELOAD_AHEAD = 10; // Preload more sentences in advance
 
 const groupSentences = (text) => {
   // First clean up the text - normalize all whitespace and line breaks
@@ -263,25 +263,29 @@ export default function PDFViewer({ file, onClose = () => {} }) {
             // Start preparing from after the current sentence
             const nextIndex = currentSentenceIndex + 1;
             
-            // Keep preparing until we have PRELOAD_AHEAD sentences ready or reach the end
-            while (preparedAudioData.length < PRELOAD_AHEAD && 
-                   nextIndex + preparedAudioData.length < sentences.length) {
-              
-              const prepareIndex = nextIndex + preparedAudioData.length;
-              const nextSentence = sentences[prepareIndex].trim();
-              
-              // Log which sentence we're preparing
-              console.log(`Preparing sentence ${prepareIndex + 1}/${sentences.length}:`, 
-                nextSentence.substring(0, 50) + '...');
-              
-              const audioData = await getAudioForSentence(nextSentence);
-              preparedAudioData.push({
-                index: prepareIndex,
-                audio: audioData
-              });
-              
-              console.log(`Prepared sentence ${prepareIndex + 1}, queue size: ${preparedAudioData.length}`);
-            }
+            // Prepare all remaining sentences up to PRELOAD_AHEAD
+            const prepareBatch = async (startIdx) => {
+              const promises = [];
+              for (let i = 0; i < PRELOAD_AHEAD && startIdx + i < sentences.length; i++) {
+                const prepareIndex = startIdx + i;
+                if (!preparedAudioData.some(p => p.index === prepareIndex)) {
+                  const nextSentence = sentences[prepareIndex].trim();
+                  promises.push(
+                    getAudioForSentence(nextSentence)
+                      .then(audioData => ({
+                        index: prepareIndex,
+                        audio: audioData
+                      }))
+                  );
+                }
+              }
+              const results = await Promise.all(promises);
+              preparedAudioData.push(...results);
+            };
+
+            // Start preloading immediately
+            await prepareBatch(nextIndex);
+            
           } catch (error) {
             console.error('Error preparing sentences:', error);
           }

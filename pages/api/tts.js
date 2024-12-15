@@ -67,8 +67,6 @@ async function getAudioForChunk(chunk, voice) {
   return response;
 }
 
-const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
-
 // Helper to estimate speech duration based on text length
 function estimateTextDuration(text) {
   const words = text.split(/\s+/).length;
