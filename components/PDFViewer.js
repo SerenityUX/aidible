@@ -89,6 +89,14 @@ export default function PDFViewer({ file, onClose = () => {} }) {
   const [controlsShowReading, setControlsShowReading] = useState(false);
   const [pdfTitle, setPdfTitle] = useState('');
 
+  useEffect(() => {
+    console.log('Runtime:', {
+      isEdge: typeof EdgeRuntime !== 'undefined',
+      hasReadableStream: typeof ReadableStream !== 'undefined',
+      hasMediaSource: typeof MediaSource !== 'undefined'
+    });
+  }, []);
+
   const handlePauseResume = useCallback(() => {
     if (!ttsAudioRef.current) return;
 
@@ -151,38 +159,48 @@ export default function PDFViewer({ file, onClose = () => {} }) {
 
   const setupAudioForPage = useCallback(async (pageNum) => {
     try {
-      // Add timeout promise
-      const timeoutPromise = new Promise((_, reject) => {
-        setTimeout(() => reject(new Error('TTS request timeout')), 30000);
-      });
+      // Get text from PDF first
+      const pdf = await pdfjs.getDocument(file).promise;
+      const page = await pdf.getPage(pageNum);
+      const textContent = await page.getTextContent();
+      const text = textContent.items.map(item => item.str).join(' ');
 
-      // Race between fetch and timeout
-      const response = await Promise.race([
-        fetch('/api/tts', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            text: text,
-            voice: selectedVoice,
-            speed: 1.0
-          })
-        }),
-        timeoutPromise
-      ]);
+
+
+      // Then make TTS request
+      const response = await fetch('/api/tts', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          text: text,  // Now text is defined
+          voice: selectedVoice,
+          speed: 1.0
+        })
+      });
 
       if (!response.ok || !response.body) {
         throw new Error('Failed to get audio stream');
       }
 
-      // Add response size check
+      stopReading();
+
+      // Set up MediaSource FIRST
+      const mediaSource = new MediaSource();
+      mediaSourceRef.current = mediaSource;
+      ttsAudioRef.current = new Audio();
+      ttsAudioRef.current.volume = volumeLevel;
+      const sourceUrl = URL.createObjectURL(mediaSource);
+      ttsAudioRef.current.src = sourceUrl;
+
+      // THEN get reader
       const reader = response.body.getReader();
       let totalSize = 0;
       
-      mediaSource.addEventListener('sourceopen', () => {
+      mediaSourceRef.current.addEventListener('sourceopen', () => {
         try {
-          const sourceBuffer = mediaSource.addSourceBuffer('audio/mpeg');
+          const sourceBuffer = mediaSourceRef.current.addSourceBuffer('audio/mpeg');
           readerRef.current = reader;
           const chunks = [];
           let isFirstChunk = true;
@@ -214,6 +232,14 @@ export default function PDFViewer({ file, onClose = () => {} }) {
 
             try {
               const chunk = chunks.shift();
+              console.log('Buffer state before append:', {
+                buffered: sourceBuffer.buffered.length ? 
+                  `${sourceBuffer.buffered.start(0)} - ${sourceBuffer.buffered.end(0)}` : 
+                  'empty',
+                totalSize,
+                chunkSize: chunk.byteLength
+              });
+              
               sourceBuffer.appendBuffer(chunk);
               totalSize += chunk.byteLength;
 
@@ -229,16 +255,14 @@ export default function PDFViewer({ file, onClose = () => {} }) {
                 }
               }
 
-              // Only end stream if we have received a minimum amount of data AND all chunks are processed AND stream is complete
-              if (chunks.length === 0 && isStreamCompleteRef.current && !sourceBuffer.updating && totalSize > 1000) {
+              if (chunks.length === 0 && isStreamComplete && !sourceBuffer.updating && totalSize > 1000) {
                 console.log('All chunks processed, total size:', totalSize);
-                // Add delay before ending stream
                 setTimeout(() => {
-                  if (mediaSource.readyState === 'open') {
+                  if (mediaSourceRef.current.readyState === 'open') {
                     console.log('Ending media stream');
-                    mediaSource.endOfStream();
+                    mediaSourceRef.current.endOfStream();
                   }
-                }, 500); // 500ms delay to ensure all chunks are processed
+                }, 500);
               }
             } catch (error) {
               console.error('Error appending chunk:', error);
@@ -254,17 +278,27 @@ export default function PDFViewer({ file, onClose = () => {} }) {
           });
 
           const readChunks = async () => {
+            const startTime = Date.now();
+            let lastChunkTime = startTime;
+            
             try {
               while (!isStopped) {
                 const { done, value } = await reader.read();
+                const now = Date.now();
+                console.log('Chunk timing:', {
+                  sinceStart: now - startTime,
+                  sinceLastChunk: now - lastChunkTime,
+                  chunkSize: value?.length
+                });
+                lastChunkTime = now;
 
                 if (done) {
                   console.log('Stream complete, marking as finished');
                   isStreamComplete = true;
                   if (chunks.length === 0 && !sourceBuffer.updating) {
                     console.log('No more chunks to process, ending stream');
-                    if (mediaSource.readyState === 'open') {
-                      mediaSource.endOfStream();
+                    if (mediaSourceRef.current.readyState === 'open') {
+                      mediaSourceRef.current.endOfStream();
                     }
                   }
                   break;
@@ -279,7 +313,7 @@ export default function PDFViewer({ file, onClose = () => {} }) {
                 console.log('Chunk received, length:', value?.length);
                 console.log('Chunks in queue:', chunks.length);
                 console.log('Source buffer updating:', sourceBuffer.updating);
-                console.log('MediaSource readyState:', mediaSource.readyState);
+                console.log('MediaSource readyState:', mediaSourceRef.current.readyState);
                 console.log('Stream complete:', isStreamComplete);
 
                 if (!sourceBuffer.updating) {
@@ -289,8 +323,8 @@ export default function PDFViewer({ file, onClose = () => {} }) {
             } catch (error) {
               if (error.name !== 'AbortError') {
                 console.error('Streaming error:', error);
-                if (mediaSource.readyState === 'open') {
-                  mediaSource.endOfStream('error');
+                if (mediaSourceRef.current.readyState === 'open') {
+                  mediaSourceRef.current.endOfStream('error');
                 }
               }
               cleanup();
@@ -298,12 +332,12 @@ export default function PDFViewer({ file, onClose = () => {} }) {
             }
           };
 
-          mediaSource.addEventListener('sourceended', () => {
+          mediaSourceRef.current.addEventListener('sourceended', () => {
             console.log('MediaSource ended, cleaning up');
             cleanup();
           });
 
-          mediaSource.addEventListener('sourceclose', cleanup);
+          mediaSourceRef.current.addEventListener('sourceclose', cleanup);
 
           readChunks();
         } catch (error) {
@@ -322,10 +356,9 @@ export default function PDFViewer({ file, onClose = () => {} }) {
         ttsAudioRef.current.onended = async () => {
           console.log('Audio playback ended');
           
-          // Add delay before checking stream state
           await new Promise(resolve => setTimeout(resolve, 100));
           
-          if (mediaSourceRef.current?.readyState === 'ended' && isStreamCompleteRef.current) {
+          if (mediaSourceRef.current?.readyState === 'ended' && isStreamComplete) {
             console.log('MediaSource ended and stream complete, moving to next page if available');
             if (pageNum < numPages) {
               const nextPageNumber = pageNum + 1;
@@ -337,11 +370,11 @@ export default function PDFViewer({ file, onClose = () => {} }) {
           } else {
             console.log('Audio ended but stream not complete, restarting playback');
             try {
-              if (ttsAudioRef.current && !isStreamCompleteRef.current) {
+              if (ttsAudioRef.current && !isStreamComplete) {
                 await ttsAudioRef.current.play();
               }
             } catch (error) {
-              if (error.name !== 'AbortError') {  // Ignore abort errors
+              if (error.name !== 'AbortError') {
                 console.error('Error restarting playback:', error);
               }
             }
@@ -472,8 +505,15 @@ export default function PDFViewer({ file, onClose = () => {} }) {
   useEffect(() => {
     return () => {
       stopReading();
+      if (mediaSourceRef.current) {
+        try {
+          URL.revokeObjectURL(ttsAudioRef.current?.src);
+        } catch (e) {
+          console.warn('URL cleanup error:', e);
+        }
+      }
     };
-  }, [stopReading, pageNumber, file]);
+  }, [stopReading]);
 
   // Remove the duplicate cleanupCall declaration and keep only one:
   const cleanupCall = useCallback(() => {
