@@ -357,13 +357,13 @@ export default function PDFViewer({ file, onClose = () => {} }) {
             };
 
             ttsAudioRef.current.onended = async () => {
-              if (isCleaningUp) return;  // Don't handle if cleaning up
+              if (isCleaningUp) return;
               
               const audioElement = ttsAudioRef.current;
               const buffered = sourceBuffer.buffered;
               const duration = buffered.length ? buffered.end(0) : 0;
               const currentTime = audioElement?.currentTime || 0;
-              const hasPlayedFully = currentTime >= duration; // Changed to full duration
+              const hasPlayedFully = currentTime >= duration;
               
               console.log('Audio playback ended', {
                 currentTime,
@@ -373,15 +373,40 @@ export default function PDFViewer({ file, onClose = () => {} }) {
                 mediaSourceState: mediaSourceRef.current?.readyState
               });
 
-              if (mediaSourceRef.current?.readyState === 'ended' && isStreamComplete && hasPlayedFully) {
-                if (pageNum < numPages) {
-                  const nextPageNumber = pageNum + 1;
-                  setPageNumber(nextPageNumber);
-                  setupAudioForPage(nextPageNumber);
+              // Only move to next page if ALL conditions are met:
+              // 1. MediaSource is ended
+              // 2. Stream is complete
+              // 3. Audio has played fully
+              // 4. We're not in the middle of cleanup
+              if (mediaSourceRef.current?.readyState === 'ended' && 
+                  isStreamComplete && 
+                  hasPlayedFully && 
+                  !isCleaningUp) {
+                
+                // Add a final verification delay
+                await delay(1000);
+                
+                // Double check conditions after delay
+                if (audioElement?.currentTime >= (audioElement?.duration || 0)) {
+                  if (pageNum < numPages) {
+                    const nextPageNumber = pageNum + 1;
+                    setPageNumber(nextPageNumber);
+                    setupAudioForPage(nextPageNumber);
+                  } else {
+                    stopReading();
+                  }
                 } else {
-                  stopReading();
+                  // If we haven't actually finished, try to resume playback
+                  try {
+                    await audioElement?.play();
+                  } catch (error) {
+                    if (error.name !== 'AbortError') {
+                      console.error('Error restarting playback:', error);
+                    }
+                  }
                 }
-              } else if (!hasPlayedFully) {
+              } else {
+                // If any condition isn't met, try to resume playback
                 try {
                   await audioElement?.play();
                 } catch (error) {
