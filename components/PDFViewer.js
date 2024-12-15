@@ -11,6 +11,46 @@ import PDFBottomBar from './PDFBottomBar';
 // Initialize PDF.js worker
 pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@3.6.172/legacy/build/pdf.worker.min.js`;
 
+// Add this helper function at the top level
+const MIN_SENTENCE_LENGTH = 50; // Minimum characters for a "full" sentence
+
+const groupSentences = (sentences) => {
+  const groups = [];
+  let currentGroup = [];
+  let currentLength = 0;
+
+  sentences.forEach((sentence) => {
+    const trimmedSentence = sentence.trim();
+    
+    // Skip empty or whitespace-only sentences
+    if (!trimmedSentence) return;
+
+    // If it's a very short sentence or just a title/header (no punctuation)
+    if (trimmedSentence.length < MIN_SENTENCE_LENGTH || !trimmedSentence.match(/[.!?]$/)) {
+      currentGroup.push(trimmedSentence);
+      currentLength += trimmedSentence.length;
+    } else {
+      // If we have pending short sentences, add this one and push the group
+      if (currentGroup.length > 0) {
+        currentGroup.push(trimmedSentence);
+        groups.push(currentGroup.join(' '));
+        currentGroup = [];
+        currentLength = 0;
+      } else {
+        // It's a normal length sentence, push it as its own group
+        groups.push(trimmedSentence);
+      }
+    }
+  });
+
+  // Add any remaining sentences
+  if (currentGroup.length > 0) {
+    groups.push(currentGroup.join(' '));
+  }
+
+  return groups;
+};
+
 export default function PDFViewer({ file, onClose = () => {} }) {
 
   const voices = [{
@@ -167,9 +207,10 @@ export default function PDFViewer({ file, onClose = () => {} }) {
       const textContent = await page.getTextContent();
       const text = textContent.items.map(item => item.str).join(' ');
 
-      // Split text into sentences
-      const sentences = text.match(/[^.!?]+[.!?]+[\s\n]*/g) || [];
-      console.log(`Found ${sentences.length} sentences`);
+      // Split text into sentences and group them
+      const rawSentences = text.match(/[^.!?]+[.!?]+[\s\n]*/g) || [];
+      const sentences = groupSentences(rawSentences);
+      console.log(`Found ${sentences.length} sentence groups`);
       
       if (sentences.length === 0) {
         console.error('No sentences found in text');
