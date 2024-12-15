@@ -254,7 +254,7 @@ export default function PDFBottomBar({
         justifyContent: "space-between",
         alignItems: "center",
         width: "100%",
-        maxWidth: 600,
+        maxWidth: 568,
         margin: "0 auto"
       }}>
         <div style={{ display: 'flex', gap: '8px' }}>
