@@ -14,6 +14,9 @@ pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@3.6.172/lega
 // Add this helper function at the top level
 const MIN_SENTENCE_LENGTH = 50; // Minimum characters for a "full" sentence
 
+// Add this constant at the top
+const PRELOAD_AHEAD = 3; // Number of sentences to prepare in advance
+
 const groupSentences = (sentences) => {
   const groups = [];
   let currentGroup = [];
@@ -222,7 +225,7 @@ export default function PDFViewer({ file, onClose = () => {} }) {
       console.log('Getting audio for first sentence:', firstSentence.substring(0, 50) + '...');
 
       let currentSentenceIndex = 0;
-      let nextAudioData = null;
+      let preparedAudioData = []; // Array to store prepared audio
       let isGettingNextAudio = false;
 
       // Function to fetch audio for a sentence
@@ -246,23 +249,31 @@ export default function PDFViewer({ file, onClose = () => {} }) {
         return await response.arrayBuffer();
       };
 
-      // Function to prepare next sentence while current is playing
-      const prepareNextSentence = async () => {
-        if (currentSentenceIndex + 1 < sentences.length && !isGettingNextAudio) {
+      // Modified function to prepare multiple sentences ahead
+      const prepareNextSentences = async () => {
+        if (!isGettingNextAudio) {
           isGettingNextAudio = true;
-          const nextSentence = sentences[currentSentenceIndex + 1].trim();
-          console.log('Preparing next sentence:', nextSentence.substring(0, 50) + '...');
           try {
-            nextAudioData = await getAudioForSentence(nextSentence);
-            console.log('Next sentence audio ready');
+            // Keep preparing until we have PRELOAD_AHEAD sentences ready or reach the end
+            while (preparedAudioData.length < PRELOAD_AHEAD && 
+                   currentSentenceIndex + preparedAudioData.length < sentences.length) {
+              
+              const nextIndex = currentSentenceIndex + preparedAudioData.length;
+              const nextSentence = sentences[nextIndex].trim();
+              console.log(`Preparing sentence ${nextIndex + 1}:`, nextSentence.substring(0, 50) + '...');
+              
+              const audioData = await getAudioForSentence(nextSentence);
+              preparedAudioData.push(audioData);
+              console.log(`Prepared sentence ${nextIndex + 1}, ${preparedAudioData.length} sentences ready`);
+            }
           } catch (error) {
-            console.error('Error preparing next sentence:', error);
+            console.error('Error preparing sentences:', error);
           }
           isGettingNextAudio = false;
         }
       };
 
-      // Function to play a sentence
+      // Modified playSentence function
       const playSentence = async (audioData) => {
         const audio = new Audio();
         audio.volume = volumeLevel;
@@ -270,15 +281,14 @@ export default function PDFViewer({ file, onClose = () => {} }) {
         const blob = new Blob([audioData], { type: 'audio/mpeg' });
         const url = URL.createObjectURL(blob);
 
-        // Set up event handlers
         audio.oncanplay = () => {
           console.log(`Playing sentence ${currentSentenceIndex + 1}/${sentences.length}`);
           audio.play()
             .then(() => {
               setIsReading(true);
               isPlayingRef.current = true;
-              // Start preparing next sentence
-              prepareNextSentence();
+              // Start preparing more sentences
+              prepareNextSentences();
             })
             .catch(err => {
               console.error('Play failed:', err);
@@ -294,13 +304,14 @@ export default function PDFViewer({ file, onClose = () => {} }) {
           currentSentenceIndex++;
           
           if (currentSentenceIndex < sentences.length) {
-            // Play next sentence if it's ready
-            if (nextAudioData) {
-              const audioToPlay = nextAudioData;
-              nextAudioData = null;
-              await playSentence(audioToPlay);
+            if (preparedAudioData.length > 0) {
+              // Play the next prepared sentence
+              const nextAudioData = preparedAudioData.shift();
+              await playSentence(nextAudioData);
+              // Keep preparing more sentences
+              prepareNextSentences();
             } else {
-              // Get and play next sentence if it wasn't prepared
+              // If no prepared sentences available, get the next one
               try {
                 const nextSentence = sentences[currentSentenceIndex].trim();
                 const nextAudio = await getAudioForSentence(nextSentence);
@@ -332,8 +343,9 @@ export default function PDFViewer({ file, onClose = () => {} }) {
         audio.src = url;
       };
 
-      // Start with first sentence
+      // Start with first sentence and prepare others
       const firstAudioData = await getAudioForSentence(firstSentence);
+      prepareNextSentences(); // Start preparing next sentences right away
       await playSentence(firstAudioData);
 
     } catch (error) {
