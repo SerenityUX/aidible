@@ -232,37 +232,87 @@ export default function PDFViewer({ file, onClose = () => {} }) {
           const chunkTimeoutChecker = setInterval(() => {
             const timeSinceLastChunk = Date.now() - lastChunkTime;
             if (timeSinceLastChunk > 10000 && !isStreamComplete && !isPaused && !isCleaningUp) {
-              // Check if we're still playing buffered audio
-              const audioElement = ttsAudioRef.current;
-              const buffered = sourceBuffer.buffered;
-              const duration = buffered.length ? buffered.end(buffered.length - 1) : 0;
-              const currentTime = audioElement?.currentTime || 0;
+              try {
+                // Check if we still have valid references
+                const audioElement = ttsAudioRef.current;
+                if (!audioElement || !sourceBuffer || !mediaSourceRef.current) {
+                  cleanup();
+                  stopReading();
+                  return;
+                }
 
-              // Only stop if we're not actively playing buffered content
-              if (currentTime >= duration - 0.1) {
-                console.log('Chunk timeout detected and no more buffered audio', {
-                  timeSinceLastChunk,
-                  isStreamComplete,
-                  isPaused,
-                  currentTime,
-                  duration,
-                  buffered: buffered.length ? 
-                    `${buffered.start(0)} - ${buffered.end(0)}` : 
-                    'empty'
-                });
+                // Check if sourceBuffer is still attached to MediaSource
+                if (sourceBuffer.updating === undefined) {
+                  cleanup();
+                  stopReading();
+                  return;
+                }
+
+                const buffered = sourceBuffer.buffered;
+                const duration = buffered.length ? buffered.end(buffered.length - 1) : 0;
+                const currentTime = audioElement.currentTime || 0;
+
+                // Only stop if we're not actively playing buffered content
+                if (currentTime >= duration - 0.1) {
+                  console.log('Chunk timeout detected and no more buffered audio', {
+                    timeSinceLastChunk,
+                    isStreamComplete,
+                    isPaused,
+                    currentTime,
+                    duration,
+                    buffered: buffered.length ? 
+                      `${buffered.start(0)} - ${buffered.end(0)}` : 
+                      'empty'
+                  });
+                  cleanup();
+                  stopReading();
+                } else {
+                  console.log('Chunk timeout but still playing buffered audio', {
+                    currentTime,
+                    duration,
+                    remaining: duration - currentTime
+                  });
+                }
+              } catch (error) {
+                // If we get an error accessing sourceBuffer, clean up
+                console.error('Error checking buffer state:', error);
                 cleanup();
                 stopReading();
-              } else {
-                console.log('Chunk timeout but still playing buffered audio', {
-                  currentTime,
-                  duration,
-                  remaining: duration - currentTime
-                });
               }
             }
           }, 1000);
 
-          const appendNextChunk = async () => {
+          const readChunks = async () => {
+            try {
+              while (true) {
+                const { value, done } = await reader.read();
+                
+                if (done) {
+                  console.log('Done receiving data from server');
+                  break;
+                }
+
+                if (isCleaningUp) break;
+
+                if (value) {
+                  lastChunkTime = Date.now();
+                  chunks.push(value);
+                  console.log('Chunk received, length:', value?.length);
+                  
+                  // Process chunk if buffer isn't updating
+                  if (!sourceBuffer.updating) {
+                    appendNextChunk();
+                  }
+                }
+              }
+            } catch (error) {
+              console.error('Streaming error:', error);
+              cleanup();
+              stopReading();
+            }
+          };
+
+          const appendNextChunk = () => {
             if (chunks.length === 0 || sourceBuffer.updating || isStopped) return;
 
             try {
@@ -284,21 +334,19 @@ export default function PDFViewer({ file, onClose = () => {} }) {
 
               // Normal chunk processing
               sourceBuffer.appendBuffer(chunk);
-              
+
               // Start playback on first chunk
               if (isFirstChunk) {
                 isFirstChunk = false;
-                try {
-                  await ttsAudioRef.current?.play();
-                  console.log('Started audio playback');
-                } catch (error) {
-                  if (error.name !== 'AbortError') {
-                    console.error('Error starting playback:', error);
-                    cleanup();
-                    stopReading();
-                  }
-                  return;
-                }
+                ttsAudioRef.current?.play()
+                  .then(() => console.log('Started audio playback'))
+                  .catch(error => {
+                    if (error.name !== 'AbortError') {
+                      console.error('Error starting playback:', error);
+                      cleanup();
+                      stopReading();
+                    }
+                  });
               }
 
             } catch (error) {
@@ -310,41 +358,10 @@ export default function PDFViewer({ file, onClose = () => {} }) {
 
           // Add updateend event listener
           sourceBuffer.addEventListener('updateend', () => {
-            if (!isStopped) {
+            if (!isStopped && chunks.length > 0) {
               appendNextChunk();
             }
           });
-
-          const readChunks = async () => {
-            try {
-              while (true) {
-                const { value, done } = await reader.read();
-                
-                if (done) {
-                  console.log('Done receiving data from server');
-                  break;  // Just stop reading more chunks
-                }
-
-                if (isCleaningUp) break;  // Stop if cleaning up
-
-                lastChunkTime = Date.now();
-                chunks.push(value);
-                console.log('Chunk received, length:', value?.length);
-                console.log('Chunks in queue:', chunks.length);
-                console.log('Source buffer updating:', sourceBuffer.updating);
-                console.log('MediaSource readyState:', mediaSource?.readyState);
-                console.log('Stream complete:', isStreamComplete);
-
-                if (!sourceBuffer.updating) {
-                  appendNextChunk();
-                }
-              }
-            } catch (error) {
-              console.error('Streaming error:', error);
-              cleanup();
-              stopReading();
-            }
-          };
 
           // Update audio event handlers
           if (ttsAudioRef.current) {
