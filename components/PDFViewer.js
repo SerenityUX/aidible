@@ -232,16 +232,33 @@ export default function PDFViewer({ file, onClose = () => {} }) {
           const chunkTimeoutChecker = setInterval(() => {
             const timeSinceLastChunk = Date.now() - lastChunkTime;
             if (timeSinceLastChunk > 10000 && !isStreamComplete && !isPaused && !isCleaningUp) {
-              console.log('Chunk timeout detected', {
-                timeSinceLastChunk,
-                isStreamComplete,
-                isPaused,
-                buffered: sourceBuffer.buffered.length ? 
-                  `${sourceBuffer.buffered.start(0)} - ${sourceBuffer.buffered.end(0)}` : 
-                  'empty'
-              });
-              cleanup();
-              stopReading();
+              // Check if we're still playing buffered audio
+              const audioElement = ttsAudioRef.current;
+              const buffered = sourceBuffer.buffered;
+              const duration = buffered.length ? buffered.end(buffered.length - 1) : 0;
+              const currentTime = audioElement?.currentTime || 0;
+
+              // Only stop if we're not actively playing buffered content
+              if (currentTime >= duration - 0.1) {
+                console.log('Chunk timeout detected and no more buffered audio', {
+                  timeSinceLastChunk,
+                  isStreamComplete,
+                  isPaused,
+                  currentTime,
+                  duration,
+                  buffered: buffered.length ? 
+                    `${buffered.start(0)} - ${buffered.end(0)}` : 
+                    'empty'
+                });
+                cleanup();
+                stopReading();
+              } else {
+                console.log('Chunk timeout but still playing buffered audio', {
+                  currentTime,
+                  duration,
+                  remaining: duration - currentTime
+                });
+              }
             }
           }, 1000);
 
