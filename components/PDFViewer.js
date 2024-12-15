@@ -273,12 +273,13 @@ export default function PDFViewer({ file, onClose = () => {} }) {
                 }
               }
 
-              if (chunks.length === 0 && isStreamComplete && !sourceBuffer.updating && totalSize > 1000) {
-                console.log('All chunks processed, total size:', totalSize);
-                if (mediaSource?.readyState === 'open') {
-                  console.log('Ending media stream');
-                  mediaSource.endOfStream();
-                }
+              if (chunks.length === 0 && isStreamComplete && !sourceBuffer.updating) {
+                setTimeout(() => {
+                  if (mediaSourceRef.current?.readyState === 'open' && !sourceBuffer.updating) {
+                    console.log('All chunks processed and stream complete, ending stream');
+                    mediaSourceRef.current.endOfStream();
+                  }
+                }, 1000);
               }
             } catch (error) {
               console.error('Error appending chunk:', error);
@@ -296,16 +297,17 @@ export default function PDFViewer({ file, onClose = () => {} }) {
 
           const readChunks = async () => {
             try {
-              while (!isStopped) {
-                const { done, value } = await reader.read();
-
+              while (true) {
+                const { value, done } = await reader.read();
+                
                 if (done) {
                   console.log('Stream complete, marking as finished');
                   isStreamComplete = true;
+                  
                   if (chunks.length === 0 && !sourceBuffer.updating) {
                     console.log('No more chunks to process, ending stream');
-                    if (mediaSource?.readyState === 'open') {
-                      mediaSource.endOfStream();
+                    if (mediaSourceRef.current?.readyState === 'open') {
+                      mediaSourceRef.current.endOfStream();
                     }
                   }
                   break;
@@ -326,11 +328,9 @@ export default function PDFViewer({ file, onClose = () => {} }) {
                 }
               }
             } catch (error) {
-              if (!isCleaningUp) {  // Only handle error if not already cleaning up
-                console.error('Streaming error:', error);
-                cleanup();
-                stopReading();
-              }
+              console.error('Streaming error:', error);
+              cleanup();
+              stopReading();
             }
           };
 
