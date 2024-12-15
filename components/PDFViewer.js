@@ -303,7 +303,10 @@ export default function PDFViewer({ file, onClose = () => {} }) {
               while (true) {
                 const { value, done } = await reader.read();
                 
-                if (done) break;  // Just break the loop when done
+                if (done) {
+                  console.log('Done receiving data from server');
+                  break;  // Just stop reading more chunks
+                }
 
                 if (isCleaningUp) break;  // Stop if cleaning up
 
