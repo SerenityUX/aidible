@@ -61,7 +61,6 @@ async function getAudioForChunk(chunk, voice) {
       statusText: response.statusText,
       error: errorData
     });
-    throw new Error(`API responded with status: ${response.status}. ${JSON.stringify(errorData)}`);
   }
 
   return response;
@@ -77,9 +76,6 @@ export default async function handler(req, res) {
     
     const textChunks = splitIntoChunks(req.body.text);
     
-    if (textChunks.length === 0) {
-      throw new Error('No valid text provided');
-    }
 
     // Set response headers
     res.setHeader('Content-Type', 'audio/mpeg');

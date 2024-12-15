@@ -157,9 +157,7 @@ export default function PDFViewer({ file, onClose = () => {} }) {
       const textContent = await page.getTextContent();
       const text = textContent.items.map(item => item.str).join(' ');
 
-      if (!text.trim()) {
-        throw new Error('No text found on page');
-      }
+
 
       // Then make TTS request
       const response = await fetch('/api/tts', {
@@ -173,10 +171,6 @@ export default function PDFViewer({ file, onClose = () => {} }) {
           speed: 1.0
         })
       });
-
-      if (!response.ok || !response.body) {
-        throw new Error('Failed to get audio stream');
-      }
 
       stopReading();
 
@@ -613,9 +607,7 @@ export default function PDFViewer({ file, onClose = () => {} }) {
         }
       });
 
-      if (!authResponse.ok) {
-        throw new Error('Failed to get WebSocket authentication');
-      }
+
 
       const { apiKey: tempToken } = await authResponse.json();
 
