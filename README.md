@@ -10,5 +10,6 @@
    - Space bar to play/pause
 3. Call an AI who has access to the document to get questions answered
 4. Select voice for your reader
+5. Sleep Timer
 
 Powered by play.ai :)
