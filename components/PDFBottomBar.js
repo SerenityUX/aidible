@@ -2,6 +2,53 @@ import styles from "@/styles/components/PDFViewer.module.css";
 import Image from 'next/image';
 import { useState, useRef, useEffect } from 'react';
 
+const MIN_MINUTES = 5;
+const MAX_MINUTES = 90;
+
+const calculateAngle = (centerX, centerY, pointX, pointY) => {
+  const deltaX = pointX - centerX;
+  const deltaY = pointY - centerY;
+  let angle = Math.atan2(deltaY, deltaX) * (180 / Math.PI);
+  angle = (angle + 360) % 360;
+  angle = (angle + 90) % 360;
+  return angle;
+};
+
+const angleToMinutes = (angle) => {
+  return Math.round(MIN_MINUTES + (angle / 360) * (MAX_MINUTES - MIN_MINUTES));
+};
+
+const minutesToAngle = (minutes) => {
+  return ((minutes - MIN_MINUTES) / (MAX_MINUTES - MIN_MINUTES)) * 360;
+};
+
+const polarToCartesian = (centerX, centerY, radius, angleInDegrees) => {
+  const angleInRadians = (angleInDegrees - 90) * Math.PI / 180.0;
+  return {
+    x: centerX + (radius * Math.cos(angleInRadians)),
+    y: centerY + (radius * Math.sin(angleInRadians))
+  };
+};
+
+const describeArc = (x, y, radius, startAngle, endAngle) => {
+  const start = polarToCartesian(x, y, radius, endAngle);
+  const end = polarToCartesian(x, y, radius, startAngle);
+  const largeArcFlag = endAngle - startAngle <= 180 ? "0" : "1";
+
+  return [
+    "M", start.x, start.y,
+    "A", radius, radius, 0, largeArcFlag, 0, end.x, end.y
+  ].join(" ");
+};
+
+const calculateArcAngle = (centerX, centerY, pointX, pointY) => {
+  const deltaX = pointX - centerX;
+  const deltaY = pointY - centerY;
+  let angle = Math.atan2(deltaY, deltaX) * (180 / Math.PI) + 90;
+  if (angle < 0) angle += 360;
+  return angle;
+};
+
 export default function PDFBottomBar({ 
   pageNumber,
   numPages,
@@ -27,6 +74,13 @@ export default function PDFBottomBar({
   const voiceControlRef = useRef(null);
   const [playingSampleId, setPlayingSampleId] = useState(null);
   const audioRefs = useRef({});
+  const [showSleepTimerPopup, setShowSleepTimerPopup] = useState(false);
+  const [sleepTimer, setSleepTimer] = useState(null);
+  const [remainingTime, setRemainingTime] = useState(null);
+  const sleepTimerRef = useRef(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const [selectedMinutes, setSelectedMinutes] = useState(30); // Default to 30 minutes
+  const dialRef = useRef(null);
 
   const getVolumeIcon = (level) => {
     if (level === 0) return "/volumeMute.svg";
@@ -42,6 +96,11 @@ export default function PDFBottomBar({
       }
       if (voiceControlRef.current && !voiceControlRef.current.contains(event.target)) {
         setShowVoicePopup(false);
+      }
+      if (sleepTimerRef.current && 
+          !sleepTimerRef.current.contains(event.target) && 
+          !event.target.closest(`.${styles.sleepTimerPopup}`)) {
+        setShowSleepTimerPopup(false);
       }
     };
 
@@ -97,6 +156,96 @@ export default function PDFBottomBar({
       audioRefs.current = {};
     };
   }, []);
+
+  useEffect(() => {
+    if (remainingTime === 0) {
+      handlePauseResume();
+      setSleepTimer(null);
+      setRemainingTime(null);
+    }
+
+    if (remainingTime) {
+      const interval = setInterval(() => {
+        setRemainingTime(prev => prev - 1);
+      }, 1000);
+
+      return () => clearInterval(interval);
+    }
+  }, [remainingTime, handlePauseResume]);
+
+  const handleSetTimer = (minutes, event) => {
+    // Prevent the click from bubbling up
+    event?.stopPropagation();
+    
+    if (sleepTimer) {
+      clearTimeout(sleepTimer);
+    }
+    
+    if (minutes === 0) {
+      setSleepTimer(null);
+      setRemainingTime(null);
+      setShowSleepTimerPopup(false);
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      handlePauseResume();
+      setSleepTimer(null);
+      setRemainingTime(null);
+    }, minutes * 60 * 1000);
+
+    setSleepTimer(timer);
+    setRemainingTime(minutes * 60);
+    setSelectedMinutes(minutes);
+  };
+
+  const formatTime = (seconds) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  const handleDialMouseDown = (e) => {
+    setIsDragging(true);
+    updateTime(e);
+  };
+
+  const handleDialMouseMove = (e) => {
+    if (isDragging) {
+      updateTime(e);
+    }
+  };
+
+  const handleDialMouseUp = () => {
+    setIsDragging(false);
+  };
+
+  const updateTime = (e) => {
+    if (!dialRef.current) return;
+    
+    const rect = dialRef.current.getBoundingClientRect();
+    const centerX = rect.left + rect.width / 2;
+    const centerY = rect.top + rect.height / 2;
+    
+    const angle = calculateArcAngle(centerX, centerY, e.clientX, e.clientY);
+    const percentage = angle / 360;
+    const minutes = Math.round(MIN_MINUTES + percentage * (MAX_MINUTES - MIN_MINUTES));
+    
+    if (minutes >= MIN_MINUTES && minutes <= MAX_MINUTES) {
+      setSelectedMinutes(minutes);
+    }
+  };
+
+  useEffect(() => {
+    if (isDragging) {
+      window.addEventListener('mousemove', handleDialMouseMove);
+      window.addEventListener('mouseup', handleDialMouseUp);
+    }
+    return () => {
+      window.removeEventListener('mousemove', handleDialMouseMove);
+      window.removeEventListener('mouseup', handleDialMouseUp);
+    };
+  }, [isDragging]);
 
   return (
     <div className={styles.bottomBar}>
@@ -249,30 +398,123 @@ export default function PDFBottomBar({
           </select>
         )} */}
 
-        <div 
-          className={styles.callButton}
-          onClick={handleCall}
-          onMouseEnter={() => setIsCallButtonHovered(true)}
-          onMouseLeave={() => setIsCallButtonHovered(false)}
-          style={{ cursor: isConnecting ? 'default' : 'pointer' }}
-        >
-          <Image
-            src={
-              isConnecting ? "/phoneCallConnecting.svg" :
-              isCallActive ? 
-                (isCallButtonHovered ? "/disconnectCall.svg" : "/phoneCallConnected.svg") :
-              "/phoneCall.svg"
-            }
-            alt={
-              isConnecting ? "Connecting call" :
-              isCallActive ? 
-                (isCallButtonHovered ? "End call" : "Call connected") :
-              "Start call"
-            }
-            width={24}
-            height={24}
-            className={`${styles.controlIcon} ${isConnecting ? styles.disabled : ''}`}
-          />
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center', position: 'relative' }}>
+          <div className={styles.moonButtonContainer}>
+            <div 
+              className={`${styles.moonButton} ${remainingTime ? styles.moonButtonActive : ''}`}
+              ref={sleepTimerRef}
+              onClick={() => setShowSleepTimerPopup(!showSleepTimerPopup)}
+            >
+              <Image
+                src="/moon.svg"
+                alt="Sleep timer"
+                width={24}
+                height={24}
+                className={styles.controlIcon}
+              />
+              {remainingTime && (
+                <span className={styles.moonTimerDisplay}>
+                  {formatTime(remainingTime)}
+                </span>
+              )}
+            </div>
+            {showSleepTimerPopup && (
+              <div className={styles.sleepTimerPopup}>
+                <div className={styles.sleepTimerHeader}>
+                  Sleep Timer
+                </div>
+                <div className={styles.timerContainer}>
+                  <svg className={styles.timerProgress} viewBox="0 0 36 36">
+                    <circle
+                      cx="18"
+                      cy="18"
+                      r="16"
+                      className={styles.timerBackground}
+                    />
+                    {remainingTime && (
+                      <circle
+                        cx="18"
+                        cy="18"
+                        r="16"
+                        className={styles.timerForeground}
+                        style={{
+                          strokeDasharray: `${2 * Math.PI * 16}`,
+                          strokeDashoffset: `${2 * Math.PI * 16 * (1 - (remainingTime / 60) / 90)}`
+                        }}
+                      />
+                    )}
+                  </svg>
+                  <div className={styles.timerTime}>
+                    {remainingTime ? formatTime(remainingTime) : ""}
+                  </div>
+                </div>
+                <div className={styles.timerButtons}>
+                  {[5, 10, 15, 30].map((minutes) => (
+                    <button
+                      key={minutes}
+                      onClick={(e) => handleSetTimer(minutes, e)}
+                      className={`${styles.timerButton} ${
+                        remainingTime && Math.ceil(remainingTime / 60) === minutes 
+                          ? styles.activeTimer 
+                          : ''
+                      }`}
+                    >
+                      {minutes}m
+                    </button>
+                  ))}
+                </div>
+                <div className={styles.timerButtons}>
+                  {[45, 60, 75, 90].map((minutes) => (
+                    <button
+                      key={minutes}
+                      onClick={(e) => handleSetTimer(minutes, e)}
+                      className={`${styles.timerButton} ${
+                        remainingTime && Math.ceil(remainingTime / 60) === minutes 
+                          ? styles.activeTimer 
+                          : ''
+                      }`}
+                    >
+                      {minutes}m
+                    </button>
+                  ))}
+                </div>
+                {remainingTime && (
+                  <button
+                    onClick={(e) => handleSetTimer(0, e)}
+                    className={styles.cancelButton}
+                  >
+                    Cancel
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+
+          <div 
+            className={styles.callButton}
+            onClick={handleCall}
+            onMouseEnter={() => setIsCallButtonHovered(true)}
+            onMouseLeave={() => setIsCallButtonHovered(false)}
+            style={{ cursor: isConnecting ? 'default' : 'pointer' }}
+          >
+            <Image
+              src={
+                isConnecting ? "/phoneCallConnecting.svg" :
+                isCallActive ? 
+                  (isCallButtonHovered ? "/disconnectCall.svg" : "/phoneCallConnected.svg") :
+                "/phoneCall.svg"
+              }
+              alt={
+                isConnecting ? "Connecting call" :
+                isCallActive ? 
+                  (isCallButtonHovered ? "End call" : "Call connected") :
+                "Start call"
+              }
+              width={24}
+              height={24}
+              className={`${styles.controlIcon} ${isConnecting ? styles.disabled : ''}`}
+            />
+          </div>
         </div>
       </div>
     </div>

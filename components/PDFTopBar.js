@@ -12,7 +12,7 @@ export default function PDFTopBar({ pdfTitle, onClose, stopPlaying, setControlsS
       }}
       tabIndex={0}
     >
-      <div style={{display: "flex", justifyContent: "space-between", width: "100%", maxWidth: 600}} className={styles.titleContainer}>
+      <div style={{display: "flex", justifyContent: "space-between", width: "100%", maxWidth: 568}} className={styles.titleContainer}>
         <button 
           onClick={onClose}
           className={styles.closeButton}
