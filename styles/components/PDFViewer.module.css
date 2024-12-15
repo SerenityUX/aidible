@@ -7,7 +7,7 @@
 
 .topBar {
   padding: 0.5rem;
-  background: white;
+  background: #F5F5F5;
   border-bottom: 1px solid #e0e0e0;
   text-align: center;
   font-size: 1.1rem;
@@ -26,6 +26,7 @@
   justify-content: center;
   min-height: 0; /* Important for flex child scrolling */
   padding: 0;
+  background: #F5F5F5;
 }
 
 .contentWrapper {
@@ -38,11 +39,11 @@
 }
 
 .bottomBar {
-  background: white;
+  background: #F5F5F5;
   border-top: 1px solid #e0e0e0;
   padding: 0.5rem;
   padding-bottom: 1rem;
-  padding-top: 0;
+  padding-top: 2;
   z-index: 10;
 }
 
@@ -72,7 +73,8 @@
 }
 
 .pageInfo {
-  font-size: 14px;
+  font-size: 10px;
+  margin-bottom: 2px;
   opacity: 0.5;
   transition: opacity 0.2s ease;
 }
