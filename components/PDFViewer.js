@@ -18,29 +18,33 @@ const MIN_SENTENCE_LENGTH = 50; // Minimum characters for a "full" sentence
 const PRELOAD_AHEAD = 3; // Number of sentences to prepare in advance
 
 const groupSentences = (text) => {
-  // First clean up the text - replace multiple spaces/newlines with single space
-  const cleanText = text.replace(/\s+/g, ' ').trim();
+  // First clean up the text - normalize all whitespace and line breaks
+  const cleanText = text
+    .replace(/\n/g, ' ')  // Replace all newlines with spaces
+    .replace(/\s+/g, ' ') // Collapse multiple spaces into one
+    .trim();
   
-  // Split into sentences more carefully
-  const rawSentences = cleanText.split(/(?<=[.!?])\s+/);
+  // Split into sentences, being careful about periods in numbers and abbreviations
+  const rawSentences = cleanText
+    .match(/[^.!?]+[.!?]+/g)
+    ?.map(s => s.trim())
+    .filter(Boolean) || [];
+
   const groups = [];
   let currentGroup = [];
 
   rawSentences.forEach((sentence) => {
-    const trimmedSentence = sentence.trim();
-    
-    // Skip empty sentences
-    if (!trimmedSentence) return;
+    if (!sentence) return;
 
-    if (trimmedSentence.length < MIN_SENTENCE_LENGTH) {
-      currentGroup.push(trimmedSentence);
+    if (sentence.length < MIN_SENTENCE_LENGTH) {
+      currentGroup.push(sentence);
     } else {
       if (currentGroup.length > 0) {
-        currentGroup.push(trimmedSentence);
+        currentGroup.push(sentence);
         groups.push(currentGroup.join(' '));
         currentGroup = [];
       } else {
-        groups.push(trimmedSentence);
+        groups.push(sentence);
       }
     }
   });
@@ -256,17 +260,27 @@ export default function PDFViewer({ file, onClose = () => {} }) {
         if (!isGettingNextAudio) {
           isGettingNextAudio = true;
           try {
+            // Start preparing from after the current sentence
+            const nextIndex = currentSentenceIndex + 1;
+            
             // Keep preparing until we have PRELOAD_AHEAD sentences ready or reach the end
             while (preparedAudioData.length < PRELOAD_AHEAD && 
-                   currentSentenceIndex + preparedAudioData.length < sentences.length) {
+                   nextIndex + preparedAudioData.length < sentences.length) {
               
-              const nextIndex = currentSentenceIndex + preparedAudioData.length;
-              const nextSentence = sentences[nextIndex].trim();
-              console.log(`Preparing sentence ${nextIndex + 1}:`, nextSentence.substring(0, 50) + '...');
+              const prepareIndex = nextIndex + preparedAudioData.length;
+              const nextSentence = sentences[prepareIndex].trim();
+              
+              // Log which sentence we're preparing
+              console.log(`Preparing sentence ${prepareIndex + 1}/${sentences.length}:`, 
+                nextSentence.substring(0, 50) + '...');
               
               const audioData = await getAudioForSentence(nextSentence);
-              preparedAudioData.push(audioData);
-              console.log(`Prepared sentence ${nextIndex + 1}, ${preparedAudioData.length} sentences ready`);
+              preparedAudioData.push({
+                index: prepareIndex,
+                audio: audioData
+              });
+              
+              console.log(`Prepared sentence ${prepareIndex + 1}, queue size: ${preparedAudioData.length}`);
             }
           } catch (error) {
             console.error('Error preparing sentences:', error);
@@ -289,15 +303,8 @@ export default function PDFViewer({ file, onClose = () => {} }) {
             .then(() => {
               setIsReading(true);
               isPlayingRef.current = true;
-              // Only prepare next sentences if we're not on the first one
-              if (currentSentenceIndex === 0) {
-                // For first sentence, prepare starting from the second sentence
-                currentSentenceIndex = 1;
-                prepareNextSentences();
-                currentSentenceIndex = 0; // Reset back for proper playback
-              } else {
-                prepareNextSentences();
-              }
+              // Always prepare next sentences
+              prepareNextSentences();
             })
             .catch(err => {
               console.error('Play failed:', err);
@@ -314,17 +321,33 @@ export default function PDFViewer({ file, onClose = () => {} }) {
           
           if (currentSentenceIndex < sentences.length) {
             if (preparedAudioData.length > 0) {
-              // Play the next prepared sentence
-              const nextAudioData = preparedAudioData.shift();
-              await playSentence(nextAudioData);
+              // Find the next prepared sentence
+              const nextPrepared = preparedAudioData.find(p => p.index === currentSentenceIndex);
+              if (nextPrepared) {
+                // Remove this sentence and any earlier ones from the queue
+                preparedAudioData = preparedAudioData.filter(p => p.index > currentSentenceIndex);
+                await playSentence(nextPrepared.audio);
+              } else {
+                // If we don't have the next sentence prepared, get it now
+                try {
+                  const nextSentence = sentences[currentSentenceIndex].trim();
+                  const nextAudio = await getAudioForSentence(nextSentence);
+                  await playSentence(nextAudio);
+                } catch (error) {
+                  console.error('Error getting next sentence:', error);
+                  stopReading();
+                }
+              }
               // Keep preparing more sentences
               prepareNextSentences();
             } else {
-              // If no prepared sentences available, get the next one
+              // No prepared sentences available, get the next one
               try {
                 const nextSentence = sentences[currentSentenceIndex].trim();
                 const nextAudio = await getAudioForSentence(nextSentence);
                 await playSentence(nextAudio);
+                // Start preparing more sentences
+                prepareNextSentences();
               } catch (error) {
                 console.error('Error getting next sentence:', error);
                 stopReading();
