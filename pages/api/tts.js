@@ -34,6 +34,8 @@ function splitIntoChunks(text) {
 }
 
 async function getAudioForChunk(chunk, voice) {
+  console.log('Requesting audio for:', chunk.substring(0, 50) + '...');
+  
   const response = await fetch('https://api.play.ai/api/v1/tts/stream', {
     method: 'POST',
     headers: {
@@ -48,21 +50,20 @@ async function getAudioForChunk(chunk, voice) {
       outputFormat: 'mp3',
       speed: 1,
       sampleRate: 24000,
-      seed: null,
-      temperature: null,
       language: 'english'
     })
   });
 
   if (!response.ok) {
-    const errorData = await response.json().catch(() => ({}));
     console.error('Play.ai API Error:', {
       status: response.status,
-      statusText: response.statusText,
-      error: errorData
+      statusText: response.statusText
     });
+    throw new Error('Failed to get audio stream');
   }
 
+  // Log the response headers to debug
+  console.log('Play.ai response headers:', Object.fromEntries([...response.headers]));
   return response;
 }
 
@@ -81,47 +82,18 @@ export default async function handler(req, res) {
   }
 
   try {
-    console.log('TTS API: Starting request to Play.ai');
+    console.log('TTS API: Starting request');
     
-    const textChunks = splitIntoChunks(req.body.text);
-    const allChunks = [];
+    const response = await getAudioForChunk(req.body.text, req.body.voice);
+    
+    // Get the audio data as a buffer first
+    const audioData = await response.arrayBuffer();
+    console.log('Received audio data, size:', audioData.byteLength);
 
-    // First, get all audio chunks
-    for (const chunk of textChunks) {
-      console.log('Processing chunk:', chunk.substring(0, 50) + '...');
-      
-      const response = await getAudioForChunk(chunk, req.body.voice);
-      
-      if (!response.ok) {
-        throw new Error('Failed to get audio chunk');
-      }
-
-      // Get the chunk data as a buffer
-      const chunkBuffer = await response.arrayBuffer();
-      allChunks.push(Buffer.from(chunkBuffer));
-    }
-
-    // Set total chunks header
-    res.setHeader('X-Total-Chunks', allChunks.length.toString());
+    // Send it as one piece
     res.setHeader('Content-Type', 'audio/mpeg');
-
-    // Now stream all chunks sequentially
-    for (let i = 0; i < allChunks.length; i++) {
-      const chunk = allChunks[i];
-      
-      // Send chunk index header
-      res.setHeader('X-Chunk-Index', i.toString());
-      
-      // Write the chunk
-      res.write(chunk);
-      
-      // Add a small delay between chunks
-      if (i < allChunks.length - 1) {
-        await delay(50);
-      }
-    }
-
-    res.end();
+    res.setHeader('Content-Length', audioData.byteLength);
+    res.send(Buffer.from(audioData));
 
   } catch (error) {
     console.error('TTS API Error:', error);

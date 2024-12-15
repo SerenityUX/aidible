@@ -167,109 +167,133 @@ export default function PDFViewer({ file, onClose = () => {} }) {
       const textContent = await page.getTextContent();
       const text = textContent.items.map(item => item.str).join(' ');
 
-      // Make TTS request
-      const response = await fetch('/api/tts', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          text: text,
-          voice: selectedVoice,
-          speed: 1.0
-        })
-      });
-
-      if (!response.ok || !response.body) {
-        throw new Error('Failed to get audio stream');
+      // Split text into sentences
+      const sentences = text.match(/[^.!?]+[.!?]+[\s\n]*/g) || [];
+      console.log(`Found ${sentences.length} sentences`);
+      
+      if (sentences.length === 0) {
+        console.error('No sentences found in text');
+        return;
       }
 
-      stopReading();
+      // Get and play first sentence
+      const firstSentence = sentences[0].trim();
+      console.log('Getting audio for first sentence:', firstSentence.substring(0, 50) + '...');
 
-      // Set up MediaSource
-      const mediaSource = new MediaSource();
-      mediaSourceRef.current = mediaSource;
-      ttsAudioRef.current = new Audio();
-      ttsAudioRef.current.volume = volumeLevel;
-      const sourceUrl = URL.createObjectURL(mediaSource);
-      ttsAudioRef.current.src = sourceUrl;
+      let currentSentenceIndex = 0;
+      let nextAudioData = null;
+      let isGettingNextAudio = false;
 
-      // Get total chunks from header
-      const totalChunks = parseInt(response.headers.get('X-Total-Chunks') || '0');
-      console.log('Total chunks expected:', totalChunks);
+      // Function to fetch audio for a sentence
+      const getAudioForSentence = async (sentence) => {
+        const response = await fetch('/api/tts', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            text: sentence,
+            voice: selectedVoice,
+            speed: 1.0
+          })
+        });
 
-      mediaSource.addEventListener('sourceopen', () => {
-        try {
-          const sourceBuffer = mediaSource.addSourceBuffer('audio/mpeg');
-          const reader = response.body.getReader();
-          let processedChunks = 0;
+        if (!response.ok) {
+          throw new Error(`Failed to get audio: ${response.status}`);
+        }
 
-          const processChunks = async () => {
-            try {
-              while (true) {
-                const { value, done } = await reader.read();
-                
-                if (done) {
-                  console.log('Stream complete');
-                  if (!sourceBuffer.updating && mediaSource.readyState === 'open') {
-                    mediaSource.endOfStream();
-                  }
-                  break;
-                }
+        return await response.arrayBuffer();
+      };
 
-                if (value) {
-                  // Wait for previous update to complete
-                  if (sourceBuffer.updating) {
-                    await new Promise(resolve => {
-                      sourceBuffer.addEventListener('updateend', resolve, { once: true });
-                    });
-                  }
+      // Function to prepare next sentence while current is playing
+      const prepareNextSentence = async () => {
+        if (currentSentenceIndex + 1 < sentences.length && !isGettingNextAudio) {
+          isGettingNextAudio = true;
+          const nextSentence = sentences[currentSentenceIndex + 1].trim();
+          console.log('Preparing next sentence:', nextSentence.substring(0, 50) + '...');
+          try {
+            nextAudioData = await getAudioForSentence(nextSentence);
+            console.log('Next sentence audio ready');
+          } catch (error) {
+            console.error('Error preparing next sentence:', error);
+          }
+          isGettingNextAudio = false;
+        }
+      };
 
-                  sourceBuffer.appendBuffer(value);
-                  processedChunks++;
+      // Function to play a sentence
+      const playSentence = async (audioData) => {
+        const audio = new Audio();
+        audio.volume = volumeLevel;
 
-                  // Start playback after first chunk
-                  if (processedChunks === 1) {
-                    try {
-                      await ttsAudioRef.current.play();
-                      setIsReading(true);
-                    } catch (error) {
-                      if (error.name !== 'AbortError') {
-                        console.error('Playback error:', error);
-                      }
-                    }
-                  }
+        const blob = new Blob([audioData], { type: 'audio/mpeg' });
+        const url = URL.createObjectURL(blob);
 
-                  console.log(`Processed chunk ${processedChunks}/${totalChunks}`);
-                }
+        // Set up event handlers
+        audio.oncanplay = () => {
+          console.log(`Playing sentence ${currentSentenceIndex + 1}/${sentences.length}`);
+          audio.play()
+            .then(() => {
+              setIsReading(true);
+              isPlayingRef.current = true;
+              // Start preparing next sentence
+              prepareNextSentence();
+            })
+            .catch(err => {
+              console.error('Play failed:', err);
+              URL.revokeObjectURL(url);
+              stopReading();
+            });
+        };
+
+        audio.onended = async () => {
+          console.log(`Finished sentence ${currentSentenceIndex + 1}`);
+          URL.revokeObjectURL(url);
+          
+          currentSentenceIndex++;
+          
+          if (currentSentenceIndex < sentences.length) {
+            // Play next sentence if it's ready
+            if (nextAudioData) {
+              const audioToPlay = nextAudioData;
+              nextAudioData = null;
+              await playSentence(audioToPlay);
+            } else {
+              // Get and play next sentence if it wasn't prepared
+              try {
+                const nextSentence = sentences[currentSentenceIndex].trim();
+                const nextAudio = await getAudioForSentence(nextSentence);
+                await playSentence(nextAudio);
+              } catch (error) {
+                console.error('Error getting next sentence:', error);
+                stopReading();
               }
-            } catch (error) {
-              console.error('Error processing chunks:', error);
+            }
+          } else {
+            // Move to next page or stop
+            if (pageNum < numPages) {
+              const nextPageNumber = pageNum + 1;
+              setPageNumber(nextPageNumber);
+              setupAudioForPage(nextPageNumber);
+            } else {
               stopReading();
             }
-          };
-
-          processChunks();
-
-          // Update audio event handlers
-          if (ttsAudioRef.current) {
-            ttsAudioRef.current.onended = async () => {
-              if (processedChunks === totalChunks) {
-                if (pageNum < numPages) {
-                  const nextPageNumber = pageNum + 1;
-                  setPageNumber(nextPageNumber);
-                  setupAudioForPage(nextPageNumber);
-                } else {
-                  stopReading();
-                }
-              }
-            };
           }
-        } catch (error) {
-          console.error('Error in sourceopen:', error);
+        };
+
+        audio.onerror = (e) => {
+          console.error('Audio error:', e, audio?.error);
+          URL.revokeObjectURL(url);
           stopReading();
-        }
-      });
+        };
+
+        ttsAudioRef.current = audio;
+        audio.src = url;
+      };
+
+      // Start with first sentence
+      const firstAudioData = await getAudioForSentence(firstSentence);
+      await playSentence(firstAudioData);
 
     } catch (error) {
       console.error('Error setting up audio:', error);
