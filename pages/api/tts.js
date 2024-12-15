@@ -66,6 +66,9 @@ async function getAudioForChunk(chunk, voice) {
   return response;
 }
 
+// Add delay helper
+const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
@@ -76,11 +79,10 @@ export default async function handler(req, res) {
     
     const textChunks = splitIntoChunks(req.body.text);
     
-
     // Set response headers
     res.setHeader('Content-Type', 'audio/mpeg');
 
-    // Process each chunk sequentially
+    // Process each chunk sequentially with delay
     for (const chunk of textChunks) {
       console.log('Processing chunk:', chunk.substring(0, 50) + '...');
       
@@ -92,14 +94,20 @@ export default async function handler(req, res) {
         const { done, value } = await reader.read();
         
         if (done) {
+          // Add delay between chunks
+          await delay(500); // 500ms delay between chunks
           break;
         }
         
         // Write chunk to response
         res.write(Buffer.from(value));
+        // Small delay between writes
+        await delay(50); // 50ms delay between writes
       }
     }
 
+    // Add final delay before ending
+    await delay(1000);
     res.end();
 
   } catch (error) {
