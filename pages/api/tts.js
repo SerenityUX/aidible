@@ -68,9 +68,11 @@ async function getAudioForChunk(chunk, voice) {
 
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
-// Play.ai uses 24kHz sample rate, roughly 3KB/s for speech
-function estimateChunkDuration(chunkSize) {
-  return (chunkSize / 3000) * 1000; // Convert to milliseconds
+// Helper to estimate speech duration based on text length
+function estimateTextDuration(text) {
+  const words = text.split(/\s+/).length;
+  const wordsPerMinute = 260; // Average speech rate
+  return (words / wordsPerMinute) * 60 * 1000; // Convert to milliseconds
 }
 
 export default async function handler(req, res) {
@@ -85,34 +87,33 @@ export default async function handler(req, res) {
     
     res.setHeader('Content-Type', 'audio/mpeg');
 
-    // Process each chunk sequentially with much longer delays
     for (const chunk of textChunks) {
       console.log('Processing chunk:', chunk.substring(0, 50) + '...');
+      
+      // Calculate how long this chunk should take to speak
+      const chunkDuration = estimateTextDuration(chunk);
+      console.log(`Estimated duration for chunk: ${chunkDuration}ms`);
       
       const response = await getAudioForChunk(chunk, req.body.voice);
       const reader = response.body.getReader();
 
-      // Stream this chunk's audio to the response with longer delays
+      // Stream this chunk's audio to the response
       while (true) {
         const { done, value } = await reader.read();
         
         if (done) {
-          // Much longer delay between chunks - 2 seconds
-          await delay(2000);
+          // Add delay proportional to chunk text length
+          await delay(chunkDuration / 2); // Half the estimated speech time
           break;
         }
         
-        // Write chunk to response
         res.write(Buffer.from(value));
-
-        // Add delay based on chunk size
-        const chunkDuration = estimateChunkDuration(value.length);
-        await delay(chunkDuration); // Wait approximately the full duration
+        // Small delay between writes proportional to chunk size
+        await delay(50); // Keep small delay between writes to prevent buffering issues
       }
     }
 
-    // Add longer final delay - 5 seconds
-    await delay(5000);
+    // No need for arbitrary final delay - we've already delayed based on text length
     res.end();
 
   } catch (error) {
