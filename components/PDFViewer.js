@@ -250,10 +250,11 @@ export default function PDFViewer({ file, onClose = () => {} }) {
                 }
               }
 
-              // Only end stream if we have received a minimum amount of data and all chunks are processed
+              // Only end stream if we have received a minimum amount of data AND all chunks are processed AND stream is complete
               if (chunks.length === 0 && isStreamComplete && !sourceBuffer.updating && totalSize > 1000) {
                 console.log('All chunks processed, total size:', totalSize);
                 if (mediaSource.readyState === 'open') {
+                  console.log('Ending media stream');
                   mediaSource.endOfStream();
                 }
               }
@@ -334,8 +335,9 @@ export default function PDFViewer({ file, onClose = () => {} }) {
         ttsAudioRef.current.onended = async () => {
           console.log('Audio playback ended');
           
-          if (mediaSourceRef.current?.readyState === 'ended') {
-            console.log('MediaSource ended, moving to next page if available');
+          // Check if we have a valid MediaSource and if it's actually ended
+          if (mediaSourceRef.current?.readyState === 'ended' && isStreamComplete) {
+            console.log('MediaSource ended and stream complete, moving to next page if available');
             if (pageNum < numPages) {
               const nextPageNumber = pageNum + 1;
               setPageNumber(nextPageNumber);
@@ -344,14 +346,25 @@ export default function PDFViewer({ file, onClose = () => {} }) {
               stopReading();
             }
           } else {
-            console.log('Audio ended but MediaSource not finished, continuing playback');
+            console.log('Audio ended but stream not complete, restarting playback');
+            // Try to restart playback if the stream isn't complete
+            try {
+              if (ttsAudioRef.current && !isStreamComplete) {
+                await ttsAudioRef.current.play();
+              }
+            } catch (error) {
+              console.error('Error restarting playback:', error);
+            }
           }
         };
 
         ttsAudioRef.current.onerror = () => {
           const error = ttsAudioRef.current?.error;
           console.error('Audio error:', error);
-          stopReading();
+          // Only stop reading if we have a real error
+          if (error && error.code !== undefined) {
+            stopReading();
+          }
         };
       }
 
