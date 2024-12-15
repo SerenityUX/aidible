@@ -7,6 +7,7 @@ import PDFPage from "./PDFPage";
 import styles from "@/styles/components/PDFViewer.module.css";
 import PDFTopBar from './PDFTopBar';
 import PDFBottomBar from './PDFBottomBar';
+import "react-pdf/dist/esm/Page/TextLayer.css";
 
 // Initialize PDF.js worker
 pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@3.6.172/legacy/build/pdf.worker.min.js`;
@@ -172,6 +173,7 @@ export default function PDFViewer({ file, onClose = () => {} }) {
   const audioBufferTimeoutRef = useRef(null);
   const lastChunkTimeRef = useRef(null);
   const [isBuffering, setIsBuffering] = useState(false);
+  const [currentHighlightText, setCurrentHighlightText] = useState('');
 
   useEffect(() => {
     console.log('Runtime:', {
@@ -195,6 +197,7 @@ export default function PDFViewer({ file, onClose = () => {} }) {
 
   const stopReading = useCallback((preservePauseState = false) => {
     try {
+      setCurrentHighlightText('');
       if (readerRef.current) {
         readerRef.current.cancel();
         readerRef.current = null;
@@ -233,6 +236,7 @@ export default function PDFViewer({ file, onClose = () => {} }) {
       }
     } catch (error) {
       console.error('Error stopping playback:', error);
+      setCurrentHighlightText('');
       setIsReading(false);
       if (!preservePauseState) {
         console.log('DEBUG: Setting isPaused to false via stopReading error handler');
@@ -291,27 +295,41 @@ export default function PDFViewer({ file, onClose = () => {} }) {
         if (!isGettingNextAudio) {
           isGettingNextAudio = true;
           try {
-            // Start preparing from after the current sentence
-            const nextIndex = currentSentenceIndex + 1;
+            // Clean up any prepared sentences that we've already played
+            preparedAudioData = preparedAudioData.filter(p => p.index > currentSentenceIndex);
             
-            // Keep preparing until we have PRELOAD_AHEAD sentences ready or reach the end
-            while (preparedAudioData.length < PRELOAD_AHEAD && 
-                   nextIndex + preparedAudioData.length < sentences.length) {
+            // Calculate how many more sentences we need to prepare
+            const needToPrepare = PRELOAD_AHEAD - preparedAudioData.length;
+            
+            if (needToPrepare > 0) {
+              // Start preparing from the last prepared sentence index + 1
+              const lastPreparedIndex = preparedAudioData.length > 0 
+                ? Math.max(...preparedAudioData.map(p => p.index))
+                : currentSentenceIndex;
               
-              const prepareIndex = nextIndex + preparedAudioData.length;
-              const nextSentence = sentences[prepareIndex].trim();
+              const startIndex = lastPreparedIndex + 1;
               
-              // Log which sentence we're preparing
-              console.log(`Preparing sentence ${prepareIndex + 1}/${sentences.length}:`, 
-                nextSentence.substring(0, 50) + '...');
-              
-              const audioData = await getAudioForSentence(nextSentence);
-              preparedAudioData.push({
-                index: prepareIndex,
-                audio: audioData
-              });
-              
-              console.log(`Prepared sentence ${prepareIndex + 1}, queue size: ${preparedAudioData.length}`);
+              // Prepare only the needed number of sentences
+              for (let i = 0; i < needToPrepare && startIndex + i < sentences.length; i++) {
+                const prepareIndex = startIndex + i;
+                
+                // Skip if we already have this sentence prepared
+                if (preparedAudioData.some(p => p.index === prepareIndex)) {
+                  continue;
+                }
+                
+                const nextSentence = sentences[prepareIndex].trim();
+                console.log(`Preparing sentence ${prepareIndex + 1}/${sentences.length}:`, 
+                  nextSentence.substring(0, 50) + '...');
+                
+                const audioData = await getAudioForSentence(nextSentence);
+                preparedAudioData.push({
+                  index: prepareIndex,
+                  audio: audioData
+                });
+                
+                console.log(`Prepared sentence ${prepareIndex + 1}, queue size: ${preparedAudioData.length}`);
+              }
             }
           } catch (error) {
             console.error('Error preparing sentences:', error);
@@ -325,6 +343,10 @@ export default function PDFViewer({ file, onClose = () => {} }) {
         const audio = new Audio();
         audio.volume = volumeLevel;
 
+        // Set the current sentence text for highlighting
+        const currentSentence = sentences[currentSentenceIndex];
+        setCurrentHighlightText(currentSentence);
+
         const blob = new Blob([audioData], { type: 'audio/mpeg' });
         const url = URL.createObjectURL(blob);
 
@@ -334,7 +356,6 @@ export default function PDFViewer({ file, onClose = () => {} }) {
             .then(() => {
               setIsReading(true);
               isPlayingRef.current = true;
-              // Always prepare next sentences
               prepareNextSentences();
             })
             .catch(err => {
@@ -347,6 +368,7 @@ export default function PDFViewer({ file, onClose = () => {} }) {
         audio.onended = async () => {
           console.log(`Finished sentence ${currentSentenceIndex + 1}`);
           URL.revokeObjectURL(url);
+          setCurrentHighlightText(''); // Clear highlight when sentence ends
           
           currentSentenceIndex++;
           
@@ -638,7 +660,10 @@ export default function PDFViewer({ file, onClose = () => {} }) {
         body: JSON.stringify({
           voice: selectedVoice,
           voiceName: voiceName,
-          pageText: pageText
+          pageText: pageText,
+          documentTitle: pdfTitle,
+          currentPage: pageNumber,
+          totalPages: numPages
         })
       });
 
@@ -826,7 +851,7 @@ export default function PDFViewer({ file, onClose = () => {} }) {
       console.error('Error setting up call:', error);
       cleanupCall();
     }
-  }, [file, pageNumber, isReading, isPaused, handlePauseResume, selectedVoice, isCallActive, cleanupCall, volumeLevel]);
+  }, [file, pageNumber, isReading, isPaused, handlePauseResume, selectedVoice, isCallActive, cleanupCall, volumeLevel, pdfTitle, numPages]);
 
   const handleVolumeChange = useCallback((e) => {
     const newVolume = parseFloat(e.target.value) / 100;
@@ -867,7 +892,10 @@ export default function PDFViewer({ file, onClose = () => {} }) {
             onLoadError={handleDocumentLoadError}
             loading={<div></div>}
           >
-            <PDFPage pageNumber={pageNumber} />
+            <PDFPage 
+              pageNumber={pageNumber} 
+              highlightText={currentHighlightText}
+            />
           </Document>
         </div>
       </div>

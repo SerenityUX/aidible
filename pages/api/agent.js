@@ -4,9 +4,17 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { voice, voiceName, pageText } = req.body;
+    const { voice, voiceName, pageText, documentTitle, currentPage, totalPages } = req.body;
     
     console.log('Creating agent with voice:', voice);
+
+    const systemPrompt = `You are an AI assistant helping to read and discuss a PDF document titled "${documentTitle}". 
+We are currently on page ${currentPage} of ${totalPages}.
+
+The text on the current page is:
+${pageText}
+
+Please help answer any questions about this content. You can reference the document title and page number in your responses when relevant.`;
 
     const response = await fetch('https://api.play.ai/api/v1/agents', {
       method: 'POST',
@@ -24,7 +32,7 @@ export default async function handler(req, res) {
         greeting: `Hey ${voiceName} here! I'm seeing this document you have pulled up here, how can I help?`,
         answerOnlyFromCriticalKnowledge: true,
         voiceSpeed: 1.0,
-        prompt: `You are a helpful reading assistant named ${voiceName}. Your role is to help users understand the content of a document. Be friendly and professional.`,
+        prompt: systemPrompt,
         criticalKnowledge: pageText.substring(0, 20000)
       })
     });

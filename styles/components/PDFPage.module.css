@@ -2,11 +2,27 @@
   position: relative;
 }
 
-.textLayer {
-  user-select: text !important;
-  cursor: text !important;
+.highlightLayer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  pointer-events: none;
 }
 
-.textLayer > span {
-  cursor: text !important;
+.currentChunk {
+  background: linear-gradient(180deg, rgba(167, 57, 251, 0.3) -0.14%, rgba(136, 25, 220, 0.3) 103.43%);
+  position: absolute;
+  mix-blend-mode: multiply;
+  pointer-events: none;
+  border-radius: 2px;
+}
+
+.partialMatch {
+  background: linear-gradient(180deg, rgba(167, 57, 251, 0.15) -0.14%, rgba(136, 25, 220, 0.15) 103.43%);
+  position: absolute;
+  mix-blend-mode: multiply;
+  pointer-events: none;
+  border-radius: 2px;
 }
