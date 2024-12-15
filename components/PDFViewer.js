@@ -11,8 +11,10 @@ import PDFBottomBar from './PDFBottomBar';
 // Initialize PDF.js worker
 pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@3.6.172/legacy/build/pdf.worker.min.js`;
 
-// Add this helper function at the top level
+// Update these constants at the top
 const MIN_SENTENCE_LENGTH = 50; // Minimum characters for a "full" sentence
+const MAX_GROUP_DURATION = 8; // Maximum duration in seconds
+const CHARS_PER_SECOND = 15; // Approximate characters spoken per second
 
 // Add this constant at the top
 const PRELOAD_AHEAD = 10; // Number of sentences to prepare in advance
@@ -32,30 +34,57 @@ const groupSentences = (text) => {
 
   const groups = [];
   let currentGroup = [];
+  let currentGroupLength = 0;
+
+  const estimateDuration = (text) => text.length / CHARS_PER_SECOND;
 
   rawSentences.forEach((sentence) => {
     if (!sentence) return;
 
-    if (sentence.length < MIN_SENTENCE_LENGTH) {
-      currentGroup.push(sentence);
-    } else {
+    const sentenceDuration = estimateDuration(sentence);
+    const currentGroupDuration = estimateDuration(currentGroup.join(' '));
+    const combinedDuration = estimateDuration(currentGroup.join(' ') + ' ' + sentence);
+
+    if (sentenceDuration > MAX_GROUP_DURATION) {
+      // If current sentence alone exceeds max duration, add it as its own group
       if (currentGroup.length > 0) {
-        currentGroup.push(sentence);
         groups.push(currentGroup.join(' '));
         currentGroup = [];
-      } else {
-        groups.push(sentence);
       }
+      groups.push(sentence);
+    } else if (sentence.length < MIN_SENTENCE_LENGTH) {
+      // Short sentence - check if adding it would exceed max duration
+      if (combinedDuration <= MAX_GROUP_DURATION) {
+        currentGroup.push(sentence);
+      } else {
+        // Adding would exceed max duration, store current group and start new one
+        if (currentGroup.length > 0) {
+          groups.push(currentGroup.join(' '));
+          currentGroup = [sentence];
+        } else {
+          currentGroup.push(sentence);
+        }
+      }
+    } else {
+      // Long sentence - check if current group should be stored
+      if (currentGroup.length > 0) {
+        groups.push(currentGroup.join(' '));
+        currentGroup = [];
+      }
+      groups.push(sentence);
     }
   });
 
+  // Add any remaining sentences in the current group
   if (currentGroup.length > 0) {
     groups.push(currentGroup.join(' '));
   }
 
-  // Debug log
+  // Debug log with duration estimates
   groups.forEach((group, i) => {
-    console.log(`Group ${i + 1}:`, group.substring(0, 100) + '...');
+    const duration = estimateDuration(group);
+    console.log(`Group ${i + 1} (est. ${duration.toFixed(1)}s):`, 
+      group.substring(0, 100) + (group.length > 100 ? '...' : ''));
   });
 
   return groups;
