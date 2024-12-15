@@ -427,3 +427,44 @@
   /* Remove this since it's inherited from iconContainer */
 }
 
+.titleAndControls {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.playbackControls {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.controlButton {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+}
+
+.controlButton:hover {
+  background: rgba(0, 0, 0, 0.1);
+}
+
+/* Add these new specific classes */
+.audioControlButton {
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 50%;
+  transition: background-color 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.audioControlButton:hover {
+  background-color: rgba(0, 0, 0, 0.05);
+}
+

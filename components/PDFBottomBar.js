@@ -17,7 +17,8 @@ export default function PDFBottomBar({
   isConnecting,
   volumeLevel,
   handleVolumeChange,
-  voices
+  voices,
+  stopReading
 }) {
   const [isCallButtonHovered, setIsCallButtonHovered] = useState(false);
   const [showVolumePopup, setShowVolumePopup] = useState(false);
@@ -205,8 +206,18 @@ export default function PDFBottomBar({
                 width={48}
                 height={48}
                 onClick={controlsShowReading ? handlePauseResume : handleReadPage}
-                className={styles.controlIcon}
+                className={`${styles.controlIcon} ${styles.audioControlButton}`}
               />
+              {controlsShowReading && (
+                <Image
+                  src="/stopButton.svg"
+                  alt="Stop"
+                  width={48}
+                  height={48}
+                  onClick={stopReading}
+                  className={`${styles.controlIcon} ${styles.audioControlButton}`}
+                />
+              )}
             </div>
             <Image
               src="/rightButton.svg" 

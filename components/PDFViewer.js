@@ -89,12 +89,6 @@ export default function PDFViewer({ file, onClose = () => {} }) {
   const [controlsShowReading, setControlsShowReading] = useState(false);
   const [pdfTitle, setPdfTitle] = useState('');
 
-  useEffect(() => {
-    if (process.env.NODE_ENV === 'development') {
-      console.log('API Key available:', !!process.env.NEXT_PUBLIC_APIKey);
-    }
-  }, []);
-
   const handlePauseResume = useCallback(() => {
     if (!ttsAudioRef.current) return;
 
@@ -758,6 +752,10 @@ export default function PDFViewer({ file, onClose = () => {} }) {
         volumeLevel={volumeLevel}
         handleVolumeChange={handleVolumeChange}
         voices={voices}
+        stopReading={() => {
+          stopReading();
+          setControlsShowReading(false);
+        }}
       />
     </div>
   );

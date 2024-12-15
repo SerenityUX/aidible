@@ -21,9 +21,10 @@ export default async function handler(req, res) {
         displayName: voiceName,
         description: `AI Assistant helping with document understanding`,
         visibility: 'private',
+        greeting: `Hey ${voiceName} here! I'm seeing this document you have pulled up here, how can I help?`,
         answerOnlyFromCriticalKnowledge: true,
         voiceSpeed: 1.0,
-        prompt: `You are a helpful assistant named ${voiceName}. Your role is to help users understand the content of a document. Be friendly and professional.`,
+        prompt: `You are a helpful reading assistant named ${voiceName}. Your role is to help users understand the content of a document. Be friendly and professional.`,
         criticalKnowledge: pageText.substring(0, 200000)
       })
     });
