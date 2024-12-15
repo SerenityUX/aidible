@@ -167,16 +167,14 @@ export default function PDFViewer({ file, onClose = () => {} }) {
       const textContent = await page.getTextContent();
       const text = textContent.items.map(item => item.str).join(' ');
 
-
-
-      // Then make TTS request
+      // Make TTS request
       const response = await fetch('/api/tts', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          text: text,  // Now text is defined
+          text: text,
           voice: selectedVoice,
           speed: 1.0
         })
@@ -188,7 +186,7 @@ export default function PDFViewer({ file, onClose = () => {} }) {
 
       stopReading();
 
-      // Set up MediaSource FIRST
+      // Set up MediaSource
       const mediaSource = new MediaSource();
       mediaSourceRef.current = mediaSource;
       ttsAudioRef.current = new Audio();
@@ -196,306 +194,88 @@ export default function PDFViewer({ file, onClose = () => {} }) {
       const sourceUrl = URL.createObjectURL(mediaSource);
       ttsAudioRef.current.src = sourceUrl;
 
-      // THEN get reader
-      const reader = response.body.getReader();
-      let totalSize = 0;
-      
+      // Get total chunks from header
+      const totalChunks = parseInt(response.headers.get('X-Total-Chunks') || '0');
+      console.log('Total chunks expected:', totalChunks);
+
       mediaSource.addEventListener('sourceopen', () => {
         try {
           const sourceBuffer = mediaSource.addSourceBuffer('audio/mpeg');
-          readerRef.current = reader;
-          const chunks = [];
-          let isFirstChunk = true;
-          let isStopped = false;
-          let isStreamComplete = false;
-          let lastChunkTime = Date.now();
-          let isCleaningUp = false;  // Add cleanup state
+          const reader = response.body.getReader();
+          let processedChunks = 0;
 
-          const cleanup = () => {
-            if (isCleaningUp) return;  // Prevent multiple cleanups
-            isCleaningUp = true;
-            
-            clearInterval(chunkTimeoutChecker);
-            isStopped = true;
-
-            try {
-              if (readerRef.current) {
-                readerRef.current.cancel();
-                readerRef.current = null;
-              }
-            } catch (e) {
-              console.warn('Reader cleanup error:', e);
-            }
-          };
-
-          // Update chunk timeout checker
-          const chunkTimeoutChecker = setInterval(() => {
-            const timeSinceLastChunk = Date.now() - lastChunkTime;
-            if (timeSinceLastChunk > 10000 && !isStreamComplete && !isPaused && !isCleaningUp) {
-              try {
-                // Check if we still have valid references
-                const audioElement = ttsAudioRef.current;
-                if (!audioElement || !sourceBuffer || !mediaSourceRef.current) {
-                  cleanup();
-                  stopReading();
-                  return;
-                }
-
-                // Check if sourceBuffer is still attached to MediaSource
-                if (sourceBuffer.updating === undefined) {
-                  cleanup();
-                  stopReading();
-                  return;
-                }
-
-                const buffered = sourceBuffer.buffered;
-                const duration = buffered.length ? buffered.end(buffered.length - 1) : 0;
-                const currentTime = audioElement.currentTime || 0;
-
-                // Only stop if we're not actively playing buffered content
-                if (currentTime >= duration - 0.1) {
-                  console.log('Chunk timeout detected and no more buffered audio', {
-                    timeSinceLastChunk,
-                    isStreamComplete,
-                    isPaused,
-                    currentTime,
-                    duration,
-                    buffered: buffered.length ? 
-                      `${buffered.start(0)} - ${buffered.end(0)}` : 
-                      'empty'
-                  });
-                  cleanup();
-                  stopReading();
-                } else {
-                  console.log('Chunk timeout but still playing buffered audio', {
-                    currentTime,
-                    duration,
-                    remaining: duration - currentTime
-                  });
-                }
-              } catch (error) {
-                // If we get an error accessing sourceBuffer, clean up
-                console.error('Error checking buffer state:', error);
-                cleanup();
-                stopReading();
-              }
-            }
-          }, 1000);
-
-          const readChunks = async () => {
+          const processChunks = async () => {
             try {
               while (true) {
                 const { value, done } = await reader.read();
                 
                 if (done) {
-                  console.log('Done receiving data from server');
+                  console.log('Stream complete');
+                  if (!sourceBuffer.updating && mediaSource.readyState === 'open') {
+                    mediaSource.endOfStream();
+                  }
                   break;
                 }
 
-                if (isCleaningUp) break;
-
                 if (value) {
-                  lastChunkTime = Date.now();
-                  chunks.push(value);
-                  console.log('Chunk received, length:', value?.length);
-                  
-                  // Process chunk if buffer isn't updating
-                  if (!sourceBuffer.updating) {
-                    appendNextChunk();
+                  // Wait for previous update to complete
+                  if (sourceBuffer.updating) {
+                    await new Promise(resolve => {
+                      sourceBuffer.addEventListener('updateend', resolve, { once: true });
+                    });
                   }
-                }
-              }
-            } catch (error) {
-              console.error('Streaming error:', error);
-              cleanup();
-              stopReading();
-            }
-          };
 
-          const appendNextChunk = () => {
-            if (chunks.length === 0 || sourceBuffer.updating || isStopped) return;
+                  sourceBuffer.appendBuffer(value);
+                  processedChunks++;
 
-            try {
-              // Check if we should process the next chunk yet
-              const audioElement = ttsAudioRef.current;
-              const buffered = sourceBuffer.buffered;
-              if (buffered.length) {
-                const duration = buffered.end(buffered.length - 1);
-                const currentTime = audioElement?.currentTime || 0;
-                const bufferedAhead = duration - currentTime;
-
-                // If we have more than 5 seconds buffered, wait
-                if (bufferedAhead > 5) {
-                  console.log('Throttling chunk processing:', {
-                    currentTime,
-                    bufferedUntil: duration,
-                    bufferedAhead
-                  });
-                  setTimeout(() => appendNextChunk(), 1000);
-                  return;
-                }
-              }
-
-              const chunk = chunks.shift();
-              
-              // Check for EOF marker
-              if (chunk.length === 4 && 
-                  chunk[0] === 0xFF && 
-                  chunk[1] === 0xFF && 
-                  chunk[2] === 0xFF && 
-                  chunk[3] === 0xFF) {
-                console.log('EOF marker received');
-                isStreamComplete = true;
-                if (!sourceBuffer.updating && mediaSourceRef.current?.readyState === 'open') {
-                  mediaSourceRef.current.endOfStream();
-                }
-                return;
-              }
-
-              // Normal chunk processing
-              sourceBuffer.appendBuffer(chunk);
-              console.log('Processed chunk, remaining:', chunks.length);
-
-              // Start playback on first chunk
-              if (isFirstChunk) {
-                isFirstChunk = false;
-                ttsAudioRef.current?.play()
-                  .then(() => console.log('Started audio playback'))
-                  .catch(error => {
-                    if (error.name !== 'AbortError') {
-                      console.error('Error starting playback:', error);
-                      cleanup();
-                      stopReading();
+                  // Start playback after first chunk
+                  if (processedChunks === 1) {
+                    try {
+                      await ttsAudioRef.current.play();
+                      setIsReading(true);
+                    } catch (error) {
+                      if (error.name !== 'AbortError') {
+                        console.error('Playback error:', error);
+                      }
                     }
-                  });
-              }
+                  }
 
+                  console.log(`Processed chunk ${processedChunks}/${totalChunks}`);
+                }
+              }
             } catch (error) {
-              console.error('Error processing chunk:', error);
-              cleanup();
+              console.error('Error processing chunks:', error);
               stopReading();
             }
           };
 
-          // Add updateend event listener
-          sourceBuffer.addEventListener('updateend', () => {
-            if (!isStopped && chunks.length > 0) {
-              appendNextChunk();
-            }
-          });
+          processChunks();
 
           // Update audio event handlers
           if (ttsAudioRef.current) {
-            ttsAudioRef.current.onplay = () => {
-              console.log('Audio playback started');
-              setIsReading(true);
-            };
-
             ttsAudioRef.current.onended = async () => {
-              if (isCleaningUp) return;
-              
-              const audioElement = ttsAudioRef.current;
-              const buffered = sourceBuffer.buffered;
-              const duration = buffered.length ? buffered.end(buffered.length - 1) : 0;
-              const currentTime = audioElement?.currentTime || 0;
-              
-              // If we haven't played through the whole audio yet, resume
-              if (currentTime < duration - 0.1) {
-                try {
-                  await audioElement?.play();
-                } catch (error) {
-                  if (error.name !== 'AbortError') {
-                    console.error('Error restarting playback:', error);
-                  }
+              if (processedChunks === totalChunks) {
+                if (pageNum < numPages) {
+                  const nextPageNumber = pageNum + 1;
+                  setPageNumber(nextPageNumber);
+                  setupAudioForPage(nextPageNumber);
+                } else {
+                  stopReading();
                 }
-                return;
-              }
-
-              // Only move to next page if we've played through ALL the audio
-              if (pageNum < numPages) {
-                const nextPageNumber = pageNum + 1;
-                setPageNumber(nextPageNumber);
-                setupAudioForPage(nextPageNumber);
-              } else {
-                stopReading();
               }
             };
           }
-
-          readChunks();
         } catch (error) {
-          console.error('Error setting up MediaSource:', error);
+          console.error('Error in sourceopen:', error);
           stopReading();
         }
       });
 
-      // Update the audio event handlers
-      if (ttsAudioRef.current) {
-        ttsAudioRef.current.onplay = () => {
-          console.log('Audio playback started');
-          setIsReading(true);
-        };
-
-        ttsAudioRef.current.onended = async () => {
-          console.log('Audio playback ended');
-          
-          // Check if we've actually played through the whole audio
-          const audioElement = ttsAudioRef.current;
-          const buffered = sourceBuffer.buffered;
-          const duration = buffered.length ? buffered.end(0) : 0;
-          const currentTime = audioElement?.currentTime || 0;
-          const hasPlayedThrough = currentTime >= duration;
-          
-          if (mediaSource && mediaSource.readyState === 'ended' && isStreamComplete && hasPlayedThrough) {
-            console.log('Audio fully played, moving to next page if available', {
-              currentTime: audioElement?.currentTime,
-              duration: audioElement?.duration
-            });
-            
-            if (pageNum < numPages) {
-              const nextPageNumber = pageNum + 1;
-              setPageNumber(nextPageNumber);
-              setupAudioForPage(nextPageNumber);
-            } else {
-              stopReading();
-            }
-          } else {
-            console.log('Audio ended but not finished playing through, restarting from current position', {
-              currentTime: audioElement?.currentTime,
-              duration: audioElement?.duration,
-              readyState: mediaSource?.readyState,
-              isStreamComplete
-            });
-            
-            try {
-              if (audioElement && !isStreamComplete) {
-                await audioElement.play();
-              }
-            } catch (error) {
-              if (error.name !== 'AbortError') {
-                console.error('Error restarting playback:', error);
-              }
-            }
-          }
-        };
-
-        ttsAudioRef.current.onerror = () => {
-          const error = ttsAudioRef.current?.error;
-          // Only log and stop if it's a real error
-          if (error && error.code !== undefined && error.code !== 0) {
-            console.error('Audio error:', error);
-            stopReading();
-          } else {
-            console.log('Ignoring non-critical audio error');
-          }
-        };
-      }
-
     } catch (error) {
-      console.error('Error setting up audio for page:', error);
+      console.error('Error setting up audio:', error);
       stopReading();
     }
-  }, [file, numPages, selectedVoice, stopReading, volumeLevel, isPaused]);
+  }, [file, numPages, selectedVoice, stopReading, volumeLevel]);
 
   const handleReadPage = useCallback(async (e) => {
     e?.preventDefault();

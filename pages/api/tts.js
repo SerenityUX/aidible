@@ -84,36 +84,43 @@ export default async function handler(req, res) {
     console.log('TTS API: Starting request to Play.ai');
     
     const textChunks = splitIntoChunks(req.body.text);
-    
-    res.setHeader('Content-Type', 'audio/mpeg');
+    const allChunks = [];
 
+    // First, get all audio chunks
     for (const chunk of textChunks) {
       console.log('Processing chunk:', chunk.substring(0, 50) + '...');
       
-      // Calculate how long this chunk should take to speak
-      const chunkDuration = estimateTextDuration(chunk);
-      console.log(`Estimated duration for chunk: ${chunkDuration}ms`);
-      
       const response = await getAudioForChunk(chunk, req.body.voice);
-      const reader = response.body.getReader();
+      
+      if (!response.ok) {
+        throw new Error('Failed to get audio chunk');
+      }
 
-      // Stream this chunk's audio to the response
-      while (true) {
-        const { done, value } = await reader.read();
-        
-        if (done) {
-          // Add delay proportional to chunk text length
-          await delay(chunkDuration / 2); // Half the estimated speech time
-          break;
-        }
-        
-        res.write(Buffer.from(value));
-        // Small delay between writes proportional to chunk size
-        await delay(50); // Keep small delay between writes to prevent buffering issues
+      // Get the chunk data as a buffer
+      const chunkBuffer = await response.arrayBuffer();
+      allChunks.push(Buffer.from(chunkBuffer));
+    }
+
+    // Set total chunks header
+    res.setHeader('X-Total-Chunks', allChunks.length.toString());
+    res.setHeader('Content-Type', 'audio/mpeg');
+
+    // Now stream all chunks sequentially
+    for (let i = 0; i < allChunks.length; i++) {
+      const chunk = allChunks[i];
+      
+      // Send chunk index header
+      res.setHeader('X-Chunk-Index', i.toString());
+      
+      // Write the chunk
+      res.write(chunk);
+      
+      // Add a small delay between chunks
+      if (i < allChunks.length - 1) {
+        await delay(50);
       }
     }
 
-    // No need for arbitrary final delay - we've already delayed based on text length
     res.end();
 
   } catch (error) {
