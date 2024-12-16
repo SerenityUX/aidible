@@ -637,3 +637,32 @@
   background-color: rgba(255, 255, 0, 0.3);
 }
 
+/* Add these new styles */
+.loadingSpinner {
+  animation: spin 1s linear infinite;
+}
+
+.loadingCircle {
+  stroke: currentColor;
+  stroke-dasharray: 80;
+  stroke-dashoffset: 60;
+}
+
+.loadingButton {
+  width: 48px;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #666;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+

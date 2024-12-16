@@ -49,6 +49,20 @@ const calculateArcAngle = (centerX, centerY, pointX, pointY) => {
   return angle;
 };
 
+// Add loading spinner SVG
+const LoadingSpinner = () => (
+  <svg className={styles.loadingSpinner} width="24" height="24" viewBox="0 0 24 24">
+    <circle
+      className={styles.loadingCircle}
+      cx="12"
+      cy="12"
+      r="10"
+      fill="none"
+      strokeWidth="2"
+    />
+  </svg>
+);
+
 export default function PDFBottomBar({ 
   pageNumber,
   numPages,
@@ -65,7 +79,8 @@ export default function PDFBottomBar({
   volumeLevel,
   handleVolumeChange,
   voices,
-  stopReading
+  stopReading,
+  isLoading
 }) {
   const [isCallButtonHovered, setIsCallButtonHovered] = useState(false);
   const [showVolumePopup, setShowVolumePopup] = useState(false);
@@ -349,15 +364,22 @@ export default function PDFBottomBar({
               style={{ cursor: pageNumber <= 1 ? 'default' : 'pointer' }}
             />
             <div className={styles.audioControls}>
-              <Image
-                src={(!controlsShowReading || isPaused) ? "/playButton.svg" : "/pauseButton.svg"}
-                alt={(!controlsShowReading || isPaused) ? "Play" : "Pause"}
-                width={48}
-                height={48}
-                onClick={controlsShowReading ? handlePauseResume : handleReadPage}
-                className={`${styles.controlIcon} ${styles.audioControlButton}`}
-              />
-              {controlsShowReading && (
+              {isLoading ? (
+                <div className={styles.loadingButton}>
+                  <LoadingSpinner />
+                </div>
+              ) : (
+                <Image
+                  src={(!controlsShowReading || isPaused) ? "/playButton.svg" : "/pauseButton.svg"}
+                  alt={(!controlsShowReading || isPaused) ? "Play" : "Pause"}
+                  width={48}
+                  height={48}
+                  onClick={controlsShowReading ? handlePauseResume : handleReadPage}
+                  className={`${styles.controlIcon} ${styles.audioControlButton} ${isLoading ? styles.disabled : ''}`}
+                  style={{ cursor: isLoading ? 'default' : 'pointer' }}
+                />
+              )}
+              {controlsShowReading && !isLoading && (
                 <Image
                   src="/stopButton.svg"
                   alt="Stop"

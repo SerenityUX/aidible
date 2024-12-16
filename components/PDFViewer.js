@@ -174,6 +174,7 @@ export default function PDFViewer({ file, onClose = () => {} }) {
   const lastChunkTimeRef = useRef(null);
   const [isBuffering, setIsBuffering] = useState(false);
   const [currentHighlightText, setCurrentHighlightText] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
 
   useEffect(() => {
     console.log('Runtime:', {
@@ -184,7 +185,7 @@ export default function PDFViewer({ file, onClose = () => {} }) {
   }, []);
 
   const handlePauseResume = useCallback(() => {
-    if (!ttsAudioRef.current) return;
+    if (!ttsAudioRef.current || isLoading) return;
 
     if (ttsAudioRef.current.paused) {
       ttsAudioRef.current.play();
@@ -193,7 +194,7 @@ export default function PDFViewer({ file, onClose = () => {} }) {
       ttsAudioRef.current.pause();
       setIsPaused(true);
     }
-  }, []);
+  }, [isLoading]);
 
   const stopReading = useCallback((preservePauseState = false) => {
     try {
@@ -319,8 +320,8 @@ export default function PDFViewer({ file, onClose = () => {} }) {
                 }
                 
                 const nextSentence = sentences[prepareIndex].trim();
-                console.log(`Preparing sentence ${prepareIndex + 1}/${sentences.length}:`, 
-                  nextSentence.substring(0, 50) + '...');
+                // console.log(`Preparing sentence ${prepareIndex + 1}/${sentences.length}:`, 
+                //   nextSentence.substring(0, 50) + '...');
                 
                 const audioData = await getAudioForSentence(nextSentence);
                 preparedAudioData.push({
@@ -441,6 +442,9 @@ export default function PDFViewer({ file, onClose = () => {} }) {
   const handleReadPage = useCallback(async (e) => {
     e?.preventDefault();
     
+    // Don't allow starting if already loading
+    if (isLoading) return;
+    
     if (isReading) {
       console.log('Stopping current playback');
       stopReading();
@@ -449,8 +453,18 @@ export default function PDFViewer({ file, onClose = () => {} }) {
     }
 
     setControlsShowReading(true);
-    setupAudioForPage(pageNumber);
-  }, [isReading, stopReading, pageNumber, setupAudioForPage]);
+    setIsLoading(true);
+    
+    try {
+      await setupAudioForPage(pageNumber);
+    } catch (error) {
+      console.error('Error setting up audio:', error);
+      stopReading();
+      setControlsShowReading(false);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [isReading, stopReading, pageNumber, setupAudioForPage, isLoading]);
 
   const handleDocumentLoadSuccess = useCallback(async ({ numPages }) => {
     stopReading();
@@ -501,10 +515,10 @@ export default function PDFViewer({ file, onClose = () => {} }) {
     setSelectedVoice(e.target.value);
   }, []);
 
-  // Add keyboard navigation handler
+  // Modify the handleKeyDown function to check for loading state
   const handleKeyDown = useCallback((e) => {
-    // Ignore if user is typing in an input or if modifier keys are pressed
-    if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT' || 
+    // Ignore if loading, user is typing in an input, or if modifier keys are pressed
+    if (isLoading || e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT' || 
         e.ctrlKey || e.altKey || e.shiftKey || e.metaKey) {
       return;
     }
@@ -531,7 +545,7 @@ export default function PDFViewer({ file, onClose = () => {} }) {
         }
         break;
     }
-  }, [pageNumber, numPages, changePage, isReading, handlePauseResume, handleReadPage]);
+  }, [pageNumber, numPages, changePage, isReading, handlePauseResume, handleReadPage, isLoading]);
 
   // Add event listener for keyboard navigation
   useEffect(() => {
@@ -919,6 +933,7 @@ export default function PDFViewer({ file, onClose = () => {} }) {
           stopReading();
           setControlsShowReading(false);
         }}
+        isLoading={isLoading}
       />
     </div>
   );

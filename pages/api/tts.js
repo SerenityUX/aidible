@@ -26,9 +26,9 @@ export default async function handler(req, res) {
         voice: req.body.voice,
         outputFormat: 'mp3',
         speed: 1,
-        sampleRate: 16000,
-        bitrate: 64000,
-        quality: 'low',
+        sampleRate: 24000,
+        bitrate: 128000,
+        quality: 'high',
         language: 'english'
       })
     });

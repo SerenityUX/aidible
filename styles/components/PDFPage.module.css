@@ -1,5 +1,7 @@
 .container {
   position: relative;
+  width: 100%;
+  height: 100%;
 }
 
 .highlightLayer {
@@ -9,20 +11,30 @@
   right: 0;
   bottom: 0;
   pointer-events: none;
+  z-index: 1;
 }
 
-.currentChunk {
-  background: linear-gradient(180deg, rgba(167, 57, 251, 0.3) -0.14%, rgba(136, 25, 220, 0.3) 103.43%);
+.highlight {
   position: absolute;
-  mix-blend-mode: multiply;
-  pointer-events: none;
+  background: rgba(167, 57, 251, 0.08) !important;
   border-radius: 2px;
+  pointer-events: none;
+  mix-blend-mode: multiply;
+  box-shadow: 0 0 4px rgba(167, 57, 251, 0.05);
+  transition: all 0.3s ease-in-out;
+  opacity: 1 !important;
+  z-index: 1;
 }
 
-.partialMatch {
-  background: linear-gradient(180deg, rgba(167, 57, 251, 0.15) -0.14%, rgba(136, 25, 220, 0.15) 103.43%);
-  position: absolute;
-  mix-blend-mode: multiply;
-  pointer-events: none;
-  border-radius: 2px;
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.highlight {
+  animation: fadeIn 0.3s ease-in-out;
 }
